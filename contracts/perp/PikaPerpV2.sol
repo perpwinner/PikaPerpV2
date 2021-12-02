@@ -301,7 +301,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         uint256 tradeFee = _getTradeFee(margin, leverage, uint256(product.fee));
         IERC20(token).uniTransferFromSenderToThis((margin.add(tradeFee)).mul(tokenBase).div(BASE));
         IERC20(token).uniTransfer(protocol, tradeFee.mul(protocolRewardRatio).div(10**4).mul(tokenBase).div(BASE));
-        vault.balance += uint96(tradeFee.mul(10**4 -protocolRewardRatio).div(10**4).mul(tokenBase).div(BASE));
+        vault.balance += uint96(tradeFee.mul(10**4 - protocolRewardRatio).div(10**4));
 
         // Check exposure
         uint256 amount = margin.mul(leverage).div(BASE);
@@ -420,7 +420,7 @@ contract PikaPerpV2 is ReentrancyGuard {
             }
         }
 
-        uint256 totalFee = _updateVault(pnl, position, margin, uint256(product.fee), uint256(product.interest));
+        uint256 totalFee = _updateVaultAndGetFee(pnl, position, margin, uint256(product.fee), uint256(product.interest));
         _updateOpenInterest(uint256(position.productId), margin.mul(uint256(position.leverage)).div(BASE), position.isLong, false);
 
         emit ClosePosition(
@@ -443,7 +443,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         }
     }
 
-    function _updateVault(
+    function _updateVaultAndGetFee(
         int256 pnl,
         Position memory position,
         uint256 margin,
@@ -731,7 +731,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         Position memory position,
         uint256 margin,
         uint256 price
-    ) internal view returns(int256 _pnl) {
+    ) internal pure returns(int256 _pnl) {
         bool pnlIsNegative;
         uint256 pnl;
         if (position.isLong) {
@@ -781,7 +781,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         uint256 margin,
         uint256 leverage,
         uint256 fee
-    ) internal view returns(uint256) {
+    ) internal pure returns(uint256) {
         return margin.mul(leverage).div(10**8).mul(fee).div(10**4);
     }
 

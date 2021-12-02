@@ -43,8 +43,6 @@ library UniERC20 {
     function uniTransferFromSenderToThis(IERC20 token, uint256 amount) internal {
         if (amount > 0) {
             if (isETH(token)) {
-                console.log("value", msg.value);
-                console.log("amount", amount);
                 require(msg.value >= amount, "UniERC20: not enough value");
                 if (msg.value > amount) {
                     // Return remainder if exist
