@@ -8,6 +8,8 @@ interface IPikaPerp {
     function getShare(address stakeOwner) external view returns(uint256);
     function distributeProtocolReward() external returns(uint256);
     function distributePikaReward() external returns(uint256);
+    function distributeVaultReward() external returns(uint256);
     function getPendingPikaReward() external view returns(uint256);
     function getPendingProtocolReward() external view returns(uint256);
+    function getPendingVaultReward() external view returns(uint256);
 }

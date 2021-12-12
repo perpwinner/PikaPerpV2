@@ -175,7 +175,7 @@ describe("Trading", () => {
 			// console.log("fee", (await trading.pendingProtocolReward()).toString(), fee/100*0.2)
 			assertAlmostEqual(await trading.pendingProtocolReward(), fee*0.2);
 			assertAlmostEqual(await trading.pendingPikaReward(), fee*0.3);
-			// assertAlmostEqual(await trading.pendingVaultReward(), fee*0.5);
+			assertAlmostEqual(await trading.pendingVaultReward(), fee*0.5);
 
 			// // Check user positions
 			const position1 = (await trading.getPositions([positionId]))[0];
