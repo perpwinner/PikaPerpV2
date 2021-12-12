@@ -111,7 +111,7 @@ describe("Trading", () => {
 			150, // 1.5%, minPriceChange
 			10,
 			5000e8 // 5k eth
- 		]
+		]
 		// add products
 		await trading.addProduct(1, p);
 		// set maxMargin
@@ -165,8 +165,7 @@ describe("Trading", () => {
 			// console.log(margin*1e10, fee*1e10*0.7)
 			// console.log("current contract balance", (await provider.getBalance(trading.address)).toString())
 			assertAlmostEqual(await provider.getBalance(user), (balance_user - margin*1e10 - fee*1e10).toLocaleString('fullwide', {useGrouping:false}))
-			assertAlmostEqual(await provider.getBalance(trading.address), (parseFloat(balance_contract) + margin*1e10 + fee*1e10*0.7).toLocaleString('fullwide', {useGrouping:false}))
-
+			assertAlmostEqual(await provider.getBalance(trading.address), (parseFloat(balance_contract) + margin*1e10 + fee*1e10).toLocaleString('fullwide', {useGrouping:false}))
 			// // Check user positions
 			const position1 = (await trading.getPositions([positionId]))[0];
 			expect(position1.productId).to.equal(productId);
@@ -216,7 +215,7 @@ describe("Trading", () => {
 			expect(await tx1).to.emit(trading, "NewPosition").withArgs(positionId, user, productId, true, price1.toString(), getOraclePrice(oracle.address), margin.toString(), leverage.toString(), margin*leverage/1e8*0.001);
 			// Check balances
 			let newUserBalance = balance_user - margin*1e10 - fee*1e10;
-			let newContractBalance = parseFloat(balance_contract) + margin*1e10 + fee*1e10*0.7;
+			let newContractBalance = parseFloat(balance_contract) + margin*1e10 + fee*1e10;
 			assertAlmostEqual(await provider.getBalance(user), newUserBalance.toLocaleString('fullwide', {useGrouping:false}))
 			assertAlmostEqual(await provider.getBalance(trading.address), newContractBalance.toLocaleString('fullwide', {useGrouping:false}))
 
@@ -258,7 +257,7 @@ describe("Trading", () => {
 
 			// Check balances
 			assertAlmostEqual(await provider.getBalance(user), (balance_user - margin*1e10 - fee*1e10).toLocaleString('fullwide', {useGrouping:false}))
-			assertAlmostEqual(await provider.getBalance(trading.address), (parseFloat(balance_contract) + margin*1e10 + fee*1e10*0.7).toLocaleString('fullwide', {useGrouping:false}))
+			assertAlmostEqual(await provider.getBalance(trading.address), (parseFloat(balance_contract) + margin*1e10 + fee*1e10).toLocaleString('fullwide', {useGrouping:false}))
 
 			// // Check user positions
 			const position1 = (await trading.getPositions([positionId]))[0];
@@ -352,7 +351,7 @@ describe("Trading", () => {
 			const amount = 10000000000;
 			await trading.connect(addrs[1]).stake(amount, {from: addrs[1].address, value:  (amount*1e10).toString(), gasPrice: gasPrice});
 
-			const stakes = await trading.getStakes([1,2]);
+			const stakes = await trading.getStakes([owner.address,addrs[1].address]);
 			expect(stakes[0].shares).to.equal(BigNumber.from(vault1.shares))
 			expect(stakes[1].shares).to.equal(BigNumber.from(amount).mul(vault1.shares).div(vault1.balance))
 			const vault2 = await trading.getVault();
@@ -360,7 +359,7 @@ describe("Trading", () => {
 			// console.log(vault2.balance.toString())
 			// console.log(vault2.shares.toString())
 			const userBalanceStart = await provider.getBalance(owner.address);
-			await trading.connect(owner).redeem(1, 5000000000); // redeem half
+			await trading.connect(owner).redeem(5000000000); // redeem half
 			// const userBalanceNow = await provider.getBalance(owner.address);
 			// assertAlmostEqual(userBalanceNow.sub(userBalanceStart), vault1.balance.div(100).div(2))
 		})
