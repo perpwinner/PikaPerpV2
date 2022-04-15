@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../perp/IPikaPerp.sol";
 
-contract PikaStaking is ReentrancyGuard, Pausable {
+contract VePikaFeeReward is ReentrancyGuard, Pausable {
 
     using SafeERC20 for IERC20;
     using Address for address payable;
@@ -16,12 +16,10 @@ contract PikaStaking is ReentrancyGuard, Pausable {
     address public owner;
     address public pikaPerp;
     address public rewardToken;
-    address public stakingToken;
+    IERC20 public veToken; // immutable
 
     uint256 public cumulativeRewardPerTokenStored;
-    uint256 private _totalSupply;
 
-    mapping(address => uint256) private _balances;
     mapping(address => uint256) private claimableReward;
     mapping(address => uint256) private previousRewardPerToken;
 
@@ -31,23 +29,21 @@ contract PikaStaking is ReentrancyGuard, Pausable {
         address rewardToken,
         uint256 amount
     );
-    event Staked(address indexed user, uint256 amount);
-    event Withdrawn(address indexed user, uint256 amount);
 
-    constructor(address _stakingToken, address _rewardToken) {
+    constructor(address _veToken, address _rewardToken) {
         owner = msg.sender;
-        stakingToken = _stakingToken;
+        veToken = IERC20(_veToken);
         rewardToken = _rewardToken;
     }
 
     // Views methods
 
     function totalSupply() external view returns (uint256) {
-        return _totalSupply;
+        return veToken.totalSupply();
     }
 
     function balanceOf(address account) external view returns (uint256) {
-        return _balances[account];
+        return veToken.balanceOf(account);
     }
 
     // Governance methods
@@ -62,33 +58,15 @@ contract PikaStaking is ReentrancyGuard, Pausable {
 
     // Methods
 
-    function stake(uint256 amount) external nonReentrant whenNotPaused {
-        require(amount > 0, "Cannot stake 0");
-        updateReward(msg.sender);
-        _totalSupply += amount;
-        _balances[msg.sender] += amount;
-        IERC20(stakingToken).safeTransferFrom(msg.sender, address(this), amount);
-        emit Staked(msg.sender, amount);
-    }
-
-    function withdraw(uint256 amount) public nonReentrant {
-        require(amount > 0, "Cannot withdraw 0");
-        updateReward(msg.sender);
-        _totalSupply -= amount;
-        _balances[msg.sender] -= amount;
-        IERC20(stakingToken).safeTransfer(msg.sender, amount);
-        emit Withdrawn(msg.sender, amount);
-    }
-
     function updateReward(address account) public {
         if (account == address(0)) return;
         uint256 pikaReward = IPikaPerp(pikaPerp).distributePikaReward();
+        uint256 _totalSupply = veToken.totalSupply();
         if (_totalSupply > 0) {
             cumulativeRewardPerTokenStored += pikaReward * PRECISION / _totalSupply;
         }
         if (cumulativeRewardPerTokenStored == 0) return;
-
-        claimableReward[account] += _balances[account] * (cumulativeRewardPerTokenStored - previousRewardPerToken[account]) / PRECISION;
+        claimableReward[account] += veToken.balanceOf(account) * (cumulativeRewardPerTokenStored - previousRewardPerToken[account]) / PRECISION;
         previousRewardPerToken[account] = cumulativeRewardPerTokenStored;
     }
 
@@ -108,13 +86,13 @@ contract PikaStaking is ReentrancyGuard, Pausable {
 
     function getClaimableReward(address account) external view returns(uint256) {
         uint256 currentClaimableReward = claimableReward[account];
-        if (_totalSupply == 0) return currentClaimableReward;
+        uint256 totalSupply = veToken.totalSupply();
+        if (totalSupply == 0) return currentClaimableReward;
 
         uint256 _pendingReward = IPikaPerp(pikaPerp).getPendingPikaReward();
-        uint256 _rewardPerTokenStored = cumulativeRewardPerTokenStored + _pendingReward * PRECISION / _totalSupply;
+        uint256 _rewardPerTokenStored = cumulativeRewardPerTokenStored + _pendingReward * PRECISION / totalSupply;
         if (_rewardPerTokenStored == 0) return currentClaimableReward;
-
-        return currentClaimableReward + _balances[account] * (_rewardPerTokenStored - previousRewardPerToken[account]) / PRECISION;
+        return currentClaimableReward + veToken.balanceOf(account) * (_rewardPerTokenStored - previousRewardPerToken[account]) / PRECISION;
     }
 
     fallback() external payable {}

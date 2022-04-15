@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -8,8 +8,10 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../perp/IPikaPerp.sol";
 
-// PikaPerpV2 vault LPs can claim part of platform fee via this contract
-// adapted from https://github.com/Synthetixio/synthetix/edit/develop/contracts/StakingRewards.sol
+/** @title VePika
+    @notice PikaPerp vault LPs can claim part of platform fee via this contract
+    adapted from https://github.com/Synthetixio/synthetix/edit/develop/contracts/StakingRewards.sol
+ */
 contract VaultFeeReward is ReentrancyGuard, Pausable {
 
     using SafeERC20 for IERC20;
@@ -94,9 +96,14 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
         reinvestAmount = claimableReward[msg.sender];
         claimableReward[msg.sender] = 0;
         if (reinvestAmount > 0) {
-            IERC20(rewardToken).safeApprove(pikaPerp, 0);
-            IERC20(rewardToken).safeApprove(pikaPerp, reinvestAmount);
-            IPikaPerp(pikaPerp).stakeFor(reinvestAmount * BASE / rewardTokenBase, msg.sender);
+            if (rewardToken == address(0)) {
+                IPikaPerp(pikaPerp).stake{value: reinvestAmount}(reinvestAmount * BASE / rewardTokenBase, msg.sender);
+            } else {
+                IERC20(rewardToken).safeApprove(pikaPerp, 0);
+                IERC20(rewardToken).safeApprove(pikaPerp, reinvestAmount);
+                IPikaPerp(pikaPerp).stake(reinvestAmount * BASE / rewardTokenBase, msg.sender);
+            }
+
             emit Reinvested(
                 msg.sender,
                 rewardToken,
