@@ -69,7 +69,7 @@ contract PikaTokenGeneration is ReentrancyGuard {
     /// @param _saleClose time when the token sale closes
     /// @param _maxDepositsWhitelist max cap on wei raised during whitelist
     /// @param _pikaTokensAllocated Pika tokens allocated to this contract
-    /// @param _maxWhitelistDeposit max deposit that can be done via the whitelist deposit fn
+    /// @param _maxWhitelistDepositPerAddress max deposit that can be done via the whitelist deposit fn
     /// @param _merkleRoot the merkle root of all the whitelisted addresses
     constructor(
         address _pika,
@@ -102,12 +102,6 @@ contract PikaTokenGeneration is ReentrancyGuard {
         merkleRoot = _merkleRoot;
     }
 
-    /// Checks if a whitelisted address has already deposited using the whitelist deposit fn
-    /// @param _user user address
-    function isWhitelistedAddressDeposited(address _user) public view returns (bool) {
-        return depositsWhitelist[_user] > 0;
-    }
-
     /// Deposit fallback
     /// @dev must be equivalent to deposit(address beneficiary)
     receive() external payable isEligibleSender nonReentrant {
@@ -128,11 +122,9 @@ contract PikaTokenGeneration is ReentrancyGuard {
     }
 
     /// Deposit for whitelisted address
-    /// @param index the index of the whitelisted address in the merkle tree
     /// @param beneficiary will be able to claim tokens after saleClose
     /// @param merkleProof the merkle proof
     function depositForWhitelistedAddress(
-        uint256 index,
         address beneficiary,
         bytes32[] calldata merkleProof
     ) external payable nonReentrant {
@@ -146,7 +138,7 @@ contract PikaTokenGeneration is ReentrancyGuard {
 
         // Verify the merkle proof.
         uint256 amt = 1;
-        bytes32 node = keccak256(abi.encodePacked(index, beneficiary, amt));
+        bytes32 node = keccak256(abi.encodePacked(beneficiary, amt));
         require(
             MerkleProof.verify(merkleProof, merkleRoot, node),
             "invalid proof"
@@ -264,7 +256,7 @@ contract PikaTokenGeneration is ReentrancyGuard {
     }
 
     function getCurrentPikaPrice() external view returns(uint256) {
-        uint256 minPrice = maxDepositsWhitelist.div(pikaTokensAllocatedWhitelist).mul(1e18);
+        uint256 minPrice = maxDepositsWhitelist.mul(1e18).div(pikaTokensAllocatedWhitelist);
         if (block.timestamp <= saleStart) {
             return minPrice;
         }
