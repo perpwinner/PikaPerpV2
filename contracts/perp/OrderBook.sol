@@ -191,6 +191,22 @@ contract OrderBook is ReentrancyGuard {
         emit UpdateAdmin(_admin);
     }
 
+    function executeOrders(
+        address[] memory _openAddresses,
+        uint256[] memory _openOrderIndexes,
+        address[] memory _closeAddresses,
+        uint256[] memory _closeOrderIndexes,
+        address payable _feeReceiver
+    ) external nonReentrant {
+        require(_openAddresses.length == _openOrderIndexes.length && _closeAddresses.length == _closeOrderIndexes.length, "not same length");
+        for (uint256 i = 0; i < _openAddresses.length; i++) {
+            executeOpenOrder(_openAddresses[i], _openOrderIndexes[i], _feeReceiver);
+        }
+        for (uint256 i = 0; i < _closeAddresses.length; i++) {
+            executeCloseOrder(_closeAddresses[i], _closeOrderIndexes[i], _feeReceiver);
+        }
+    }
+
     function cancelMultiple(
         uint256[] memory _openOrderIndexes,
         uint256[] memory _closeOrderIndexes
@@ -374,7 +390,7 @@ contract OrderBook is ReentrancyGuard {
         );
     }
 
-    function executeOpenOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) external nonReentrant {
+    function executeOpenOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) public nonReentrant {
         OpenOrder memory order = openOrders[_address][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
 
@@ -464,7 +480,7 @@ contract OrderBook is ReentrancyGuard {
         );
     }
 
-    function executeCloseOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) external nonReentrant {
+    function executeCloseOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) public nonReentrant {
         CloseOrder memory order = closeOrders[_address][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
         (,uint256 leverage,,,,,,,) = IPikaPerp(pikaPerp).getPosition(_address, order.productId, order.isLong);

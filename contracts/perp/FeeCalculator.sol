@@ -12,7 +12,8 @@ contract FeeCalculator is Ownable {
     uint256 public constant PRICE_BASE = 10000;
     uint256 public threshold;
     uint256 public weightDecay;
-    uint256 public n = 10;
+    uint256 public baseFee = 10;
+    uint256 public n = 1;
     uint256 public maxDynamicFee = 50; // 0.5%
     address public oracle;
 
@@ -30,7 +31,6 @@ contract FeeCalculator is Ownable {
     /**
      * @notice The dynamic fee to add to base fee. It is updated based on the volatility of recent price updates
      * Larger volatility leads to the higher the dynamic fee. It is used to mitigate oracle front-running.
-     *
      */
     function getDynamicFee(address token) public view returns (int256) {
         uint256[] memory prices = IOracle(oracle).getLastNPrices(token, n);

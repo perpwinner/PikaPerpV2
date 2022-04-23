@@ -10,7 +10,7 @@ import '@openzeppelin/contracts-upgradeable/access/AccessControlEnumerableUpgrad
 import './IVaultReward.sol';
 
 /** @title VePika
-    @notice Support locking PIKA to earn trading fee and esPIKA rewards. The longer the lock, the higher the weight
+    @notice Support locking PIKA to earn trading fee and token rewards. The longer the lock, the higher the weight
     the staker. The weight is also manifested as vePIKA balance.
  */
 contract PikaMine is Initializable {
@@ -50,9 +50,8 @@ contract PikaMine is Initializable {
     uint256 public pikaTotalDeposits;
 
     address public owner;
-    address public rewardPool1;
-    address public rewardPool2;
-    address public rewardPool3;
+    // these can be pools for usdc vault fee reward, eth vault fee reward and token reward
+    address[] public rewardPools;
 
     /// @notice user => depositId => UserInfo
     mapping (address => mapping (uint256 => UserInfo)) public userInfo;
@@ -162,10 +161,8 @@ contract PikaMine is Initializable {
         pika = IERC20Upgradeable(_pika);
     }
 
-    function setRewardPools(address _rewardPool1, address _rewardPool2, address _rewardPool3) external onlyOwner {
-        rewardPool1 = _rewardPool1;
-        rewardPool2 = _rewardPool2;
-        rewardPool3 = _rewardPool3;
+    function setRewardPools(address[] memory _rewardPools) external onlyOwner {
+        rewardPools = _rewardPools;
     }
 
     function setOwner(address _owner) external onlyOwner {
@@ -222,9 +219,9 @@ contract PikaMine is Initializable {
     }
 
     modifier updateRewards() {
-        IVaultReward(rewardPool1).updateReward(msg.sender);
-        IVaultReward(rewardPool2).updateReward(msg.sender);
-        IVaultReward(rewardPool3).updateReward(msg.sender);
+        for (uint256 i = 0; i < rewardPools.length; i++) {
+            IVaultReward(rewardPools[i]).updateReward(msg.sender);
+        }
         _;
     }
 

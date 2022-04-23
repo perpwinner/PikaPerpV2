@@ -34,8 +34,12 @@ contract PikaTokenGeneration is ReentrancyGuard {
     uint256 public pikaTokensAllocated;
     // Pika Tokens allocated to whitelist
     uint256 public pikaTokensAllocatedWhitelist;
-    // Max ETH that can be deposited by whitelisted addresses
-    uint256 public maxWhitelistDepositPerAddress;
+    // Max ETH that can be deposited by tier 1 whitelist address
+    uint256 public whitelistMaxDeposit1;
+    // Max ETH that can be deposited by tier 2 whitelist address
+    uint256 public whitelistMaxDeposit2;
+    // Max ETH that can be deposited by tier 3 whitelist address
+    uint256 public whitelistMaxDeposit3;
     // Merkleroot of whitelisted addresses
     bytes32 public merkleRoot;
     // Amount each whitelisted user deposited
@@ -69,7 +73,9 @@ contract PikaTokenGeneration is ReentrancyGuard {
     /// @param _saleClose time when the token sale closes
     /// @param _maxDepositsWhitelist max cap on wei raised during whitelist
     /// @param _pikaTokensAllocated Pika tokens allocated to this contract
-    /// @param _maxWhitelistDepositPerAddress max deposit that can be done via the whitelist deposit fn
+    /// @param _whitelistMaxDeposit1 max deposit that can be done via the whitelist deposit fn for tier 1 whitelist address
+    /// @param _whitelistMaxDeposit2 max deposit that can be done via the whitelist deposit fn for tier 2 whitelist address
+    /// @param _whitelistMaxDeposit3 max deposit that can be done via the whitelist deposit fn for tier 3 whitelist address
     /// @param _merkleRoot the merkle root of all the whitelisted addresses
     constructor(
         address _pika,
@@ -79,7 +85,9 @@ contract PikaTokenGeneration is ReentrancyGuard {
         uint256 _saleClose,
         uint256 _maxDepositsWhitelist,
         uint256 _pikaTokensAllocated,
-        uint256 _maxWhitelistDepositPerAddress,
+        uint256 _whitelistMaxDeposit1,
+        uint256 _whitelistMaxDeposit2,
+        uint256 _whitelistMaxDeposit3,
         bytes32 _merkleRoot
     ) {
         require(_owner != address(0), "invalid owner address");
@@ -97,8 +105,10 @@ contract PikaTokenGeneration is ReentrancyGuard {
         saleClose = _saleClose;
         maxDepositsWhitelist = _maxDepositsWhitelist;
         pikaTokensAllocated = _pikaTokensAllocated;
-        pikaTokensAllocatedWhitelist = pikaTokensAllocated.mul(60).div(100); // 60% of PikaTokensAllocated
-        maxWhitelistDepositPerAddress = _maxWhitelistDepositPerAddress;
+        pikaTokensAllocatedWhitelist = pikaTokensAllocated.mul(50).div(100); // 50% of PikaTokensAllocated
+        whitelistMaxDeposit1 = _whitelistMaxDeposit1;
+        whitelistMaxDeposit2 = _whitelistMaxDeposit2;
+        whitelistMaxDeposit3 = _whitelistMaxDeposit3;
         merkleRoot = _merkleRoot;
     }
 
@@ -131,18 +141,13 @@ contract PikaTokenGeneration is ReentrancyGuard {
         require(beneficiary != address(0), "invalid address");
         require(beneficiary == msg.sender, "beneficiary not message sender");
         require(msg.value > 0, "must deposit greater than 0");
-        require(msg.value <= depositableLeftWhitelist(beneficiary), "user whitelist allocation used up");
         require((weiDepositedWhitelist + msg.value) <= maxDepositsWhitelist, "maximum deposits for whitelist reached");
         require(saleWhitelistStart <= block.timestamp, "sale hasn't started yet");
         require(block.timestamp <= saleStart, "whitelist sale has closed");
 
         // Verify the merkle proof.
-        uint256 amt = 1;
-        bytes32 node = keccak256(abi.encodePacked(beneficiary, amt));
-        require(
-            MerkleProof.verify(merkleProof, merkleRoot, node),
-            "invalid proof"
-        );
+        uint256 whitelistMaxDeposit = verifyAndGetTierAmount(beneficiary, merkleProof);
+        require(msg.value <= depositableLeftWhitelist(beneficiary, whitelistMaxDeposit), "user whitelist allocation used up");
 
         // Add user deposit to depositsWhitelist
         depositsWhitelist[beneficiary] = depositsWhitelist[beneficiary].add(
@@ -251,8 +256,25 @@ contract PikaTokenGeneration is ReentrancyGuard {
 
     /// View leftover depositable eth for whitelisted user
     /// @param beneficiary user address
-    function depositableLeftWhitelist(address beneficiary) public view returns (uint256) {
-        return maxWhitelistDepositPerAddress.sub(depositsWhitelist[beneficiary]);
+    /// @param whitelistMaxDeposit max deposit amount for user address
+    function depositableLeftWhitelist(address beneficiary, uint256 whitelistMaxDeposit) public view returns (uint256) {
+        return whitelistMaxDeposit.sub(depositsWhitelist[beneficiary]);
+    }
+
+    function verifyAndGetTierAmount(address beneficiary, bytes32[] calldata merkleProof) public returns(uint256) {
+        bytes32 node1 = keccak256(abi.encodePacked(beneficiary, whitelistMaxDeposit1));
+        if (MerkleProof.verify(merkleProof, merkleRoot, node1)) {
+            return whitelistMaxDeposit1;
+        }
+        bytes32 node2 = keccak256(abi.encodePacked(beneficiary, whitelistMaxDeposit2));
+        if (MerkleProof.verify(merkleProof, merkleRoot, node2)) {
+            return whitelistMaxDeposit2;
+        }
+        bytes32 node3 = keccak256(abi.encodePacked(beneficiary, whitelistMaxDeposit3));
+        if (MerkleProof.verify(merkleProof, merkleRoot, node3)) {
+            return whitelistMaxDeposit3;
+        }
+        revert("invalid proof");
     }
 
     function getCurrentPikaPrice() external view returns(uint256) {
@@ -264,13 +286,12 @@ contract PikaTokenGeneration is ReentrancyGuard {
         uint256 unsoldWlPika = pikaTokensAllocatedWhitelist
         .mul((maxDepositsWhitelist.sub(weiDepositedWhitelist)))
         .div(maxDepositsWhitelist);
-
         // amount of Pika tokens allocated to whitelist sale
         uint256 pikaForWl = pikaTokensAllocatedWhitelist.sub(unsoldWlPika);
 
         // amount of Pika tokens allocated to public sale
         uint256 pikaForPublic = pikaTokensAllocated.sub(pikaForWl);
-        uint256 priceForPublic = (weiDeposited.sub(weiDepositedWhitelist)).div(pikaForPublic);
+        uint256 priceForPublic = (weiDeposited.sub(weiDepositedWhitelist)).mul(1e18).div(pikaForPublic);
         return priceForPublic > minPrice ? priceForPublic : minPrice;
     }
 
