@@ -71,11 +71,11 @@ describe("PikaMine", function () {
 
             await pika.connect(alice).approve(pikaMine.address, "100000000000000000000000")
             await pika.connect(bob).approve(pikaMine.address, "100000000000000000000000")
-            await pikaMine.connect(alice).deposit("1000000000000000000000", 0)
-            await pikaMine.connect(alice).deposit("1000000000000000000000", 2)
+            await pikaMine.connect(alice).deposit("1000000000000000000000", 1)
+            await pikaMine.connect(alice).deposit("1000000000000000000000", 3)
             // console.log("total supply", await vePika.totalSupply())
             expect(await vePikaFeeReward.getClaimableReward(alice.address)).to.be.equal("2000000000000000000")
-            await pikaMine.connect(bob).deposit("2000000000000000000000", 3)
+            await pikaMine.connect(bob).deposit("2000000000000000000000", 5)
             await vePikaFeeReward.updateReward(bob.address)
             expect(await vePika.balanceOf(alice.address)).to.equal("500000000000000000000");
             expect(await vePika.balanceOf(bob.address)).to.equal("2000000000000000000000");
@@ -96,7 +96,7 @@ describe("PikaMine", function () {
             expect(await pikaMine.depositedAll(alice.address)).to.be.equal("1000000000000000000000")
             expect(await vePika.balanceOf(alice.address)).to.equal("400000000000000000000");
 
-            await pikaMine.connect(alice).deposit("1000000000000000000000", 3)
+            await pikaMine.connect(alice).deposit("1000000000000000000000", 5)
             expect(await pikaMine.depositedAll(alice.address)).to.be.equal("2000000000000000000000")
             expect(await vePika.balanceOf(alice.address)).to.equal("1400000000000000000000");
             await vePikaTokenReward.connect(owner).queueNewRewards("1000000000000000000000"); //1000 esPika

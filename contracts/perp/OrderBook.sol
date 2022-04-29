@@ -374,7 +374,7 @@ contract OrderBook is ReentrancyGuard {
             IERC20(collateralToken).uniTransfer(msg.sender, (order.executionFee + order.margin * order.leverage / BASE) * tokenBase / BASE);
         } else {
             IERC20(collateralToken).uniTransfer(msg.sender, (order.margin * order.leverage / BASE) * tokenBase / BASE);
-            payable(msg.sender).sendValue(order.executionFee.mul(tokenBase).div(BASE));
+            payable(msg.sender).sendValue(order.executionFee * 1e18 / BASE);
         }
 
         emit CancelOpenOrder(
@@ -412,7 +412,7 @@ contract OrderBook is ReentrancyGuard {
         }
 
         // pay executor
-        _feeReceiver.sendValue(order.executionFee.mul(tokenBase).div(BASE));
+        _feeReceiver.sendValue(order.executionFee * 1e18 / BASE);
 
         emit ExecuteOpenOrder(
             order.account,
@@ -435,7 +435,7 @@ contract OrderBook is ReentrancyGuard {
         uint256 _triggerPrice,
         bool _triggerAboveThreshold
     ) external payable nonReentrant {
-        require(msg.value >= minExecutionFee * tokenBase / BASE, "OrderBook: insufficient execution fee");
+        require(msg.value >= minExecutionFee * 1e18 / BASE, "OrderBook: insufficient execution fee");
 
         _createCloseOrder(
             msg.sender,
@@ -463,7 +463,7 @@ contract OrderBook is ReentrancyGuard {
             _isLong,
             _triggerPrice,
             _triggerAboveThreshold,
-            msg.value * BASE / tokenBase
+            msg.value * BASE / 1e18
         );
         closeOrdersIndex[_account] = _orderIndex.add(1);
         closeOrders[_account][_orderIndex] = order;
@@ -494,7 +494,7 @@ contract OrderBook is ReentrancyGuard {
         IPikaPerp(pikaPerp).closePosition(_address, order.productId, order.size * BASE / leverage , order.isLong);
 
         // pay executor
-        _feeReceiver.sendValue(order.executionFee.mul(tokenBase).div(BASE));
+        _feeReceiver.sendValue(order.executionFee * 1e18 / BASE);
 
         emit ExecuteCloseOrder(
             order.account,
@@ -515,7 +515,7 @@ contract OrderBook is ReentrancyGuard {
 
         delete closeOrders[msg.sender][_orderIndex];
 
-        payable(msg.sender).sendValue(order.executionFee.mul(tokenBase).div(BASE));
+        payable(msg.sender).sendValue(order.executionFee * 1e18 / BASE);
 
         emit CancelCloseOrder(
             order.account,

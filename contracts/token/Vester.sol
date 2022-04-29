@@ -171,8 +171,4 @@ contract Vester is Ownable {
         allUserDepositIds[_user].add(newDepositId);
         user = userInfo[_user][newDepositId];
     }
-
-    function setVestingPeriod(uint256 _vestingPeriod) external onlyOwner {
-        vestingPeriod = _vestingPeriod;
-    }
 }

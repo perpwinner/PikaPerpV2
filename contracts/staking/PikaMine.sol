@@ -21,7 +21,7 @@ contract PikaMine is Initializable {
     using SafeCastUpgradeable for uint256;
     using SafeCastUpgradeable for int256;
 
-    enum Lock { oneMonth, threeMonths, sixMonths, twelveMonths }
+    enum Lock { oneWeek, oneMonth, threeMonths, sixMonths, nineMonths, twelveMonths }
 
     struct UserInfo {
         uint256 depositAmount;
@@ -30,14 +30,13 @@ contract PikaMine is Initializable {
         Lock lock;
     }
 
-    bytes32 public constant PIKA_MINE_ADMIN_ROLE = keccak256("PIKA_MINE_ADMIN_ROLE");
-
     uint256 public constant DAY = 1 days;
     uint256 public constant ONE_WEEK = 7 days;
     uint256 public constant TWO_WEEKS = ONE_WEEK * 2;
     uint256 public constant ONE_MONTH = 30 days;
     uint256 public constant THREE_MONTHS = ONE_MONTH * 3;
     uint256 public constant SIX_MONTHS = ONE_MONTH * 6;
+    uint256 public constant NINE_MONTHS = ONE_MONTH * 9;
     uint256 public constant TWELVE_MONTHS = 365 days;
     uint256 public constant ONE = 1e18;
 
@@ -73,7 +72,10 @@ contract PikaMine is Initializable {
     }
 
     function getLockBoost(Lock _lock) public pure returns (uint256 boost, uint256 timelock) {
-        if (_lock == Lock.oneMonth) {
+        if (_lock == Lock.oneWeek) {
+            // 5%
+            return (5e16, ONE_WEEK);
+        } else if (_lock == Lock.oneMonth) {
             // 10%
             return (10e16, ONE_MONTH);
         } else if (_lock == Lock.threeMonths) {
@@ -82,6 +84,9 @@ contract PikaMine is Initializable {
         } else if (_lock == Lock.sixMonths) {
             // 40%
             return (40e16, SIX_MONTHS);
+        } else if (_lock == Lock.nineMonths) {
+            // 65%
+            return (65e16, NINE_MONTHS);
         } else if (_lock == Lock.twelveMonths) {
             // 100%
             return (100e16, TWELVE_MONTHS);

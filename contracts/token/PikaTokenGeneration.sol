@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import  "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
@@ -12,6 +13,7 @@ import  "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 /// (total ETH contributed for this phase / total Pika tokens for this phase)
 contract PikaTokenGeneration is ReentrancyGuard {
     using SafeMath for uint256;
+    using Math for uint256;
     using SafeERC20 for IERC20;
 
     // Pika Token
@@ -65,6 +67,7 @@ contract PikaTokenGeneration is ReentrancyGuard {
         uint256 amount
     );
     event WithdrawEth(uint256 amount);
+    event WithdrawPika(uint256 amount);
 
     /// @param _pika Pika
     /// @param _owner withdrawer
@@ -216,6 +219,42 @@ contract PikaTokenGeneration is ReentrancyGuard {
         emit WithdrawEth(ethBalance);
     }
 
+    /// @dev Withdraws unsold PIKA tokens(if any). Only owner can call this.
+    function withdrawUnsoldPika() external {
+        require(owner == msg.sender, "caller is not the owner");
+        uint256 unsoldAmount = getUnsoldPika();
+        pika.safeTransfer(owner, unsoldAmount);
+
+        emit WithdrawPika(unsoldAmount);
+    }
+
+    function getUnsoldPika() public view returns(uint256) {
+        require(block.timestamp > saleClose, "sale has not ended");
+        // amount of Pika unsold during whitelist sale
+        uint256 unsoldWlPika = pikaTokensAllocatedWhitelist
+        .mul((maxDepositsWhitelist.sub(weiDepositedWhitelist)))
+        .div(maxDepositsWhitelist);
+
+        // amount of Pika tokens allocated to whitelist sale
+        uint256 pikaForWl = pikaTokensAllocatedWhitelist.sub(unsoldWlPika);
+
+        // amount of Pika tokens allocated to public sale
+        uint256 pikaForPublic = pikaTokensAllocated.sub(pikaForWl);
+
+        // total wei deposited during the public sale
+        uint256 totalDepoPublic = weiDeposited.sub(weiDepositedWhitelist);
+
+        // the amount of Pika sold in public if it is sold at the whitelist price
+        uint256 pikaSoldPublicAtWhitelistPrice = pikaForWl.mul(totalDepoPublic).div(weiDepositedWhitelist);
+
+        // if the amount is larger than pikaForPublic, it means the actual price in public phase is higher than
+        // whitelist price and therefore all the PIKA tokens are sold out.
+        if (pikaSoldPublicAtWhitelistPrice >= pikaForPublic) {
+            return 0;
+        }
+        return pikaForPublic.sub(pikaSoldPublicAtWhitelistPrice);
+    }
+
     /// View beneficiary's claimable token amount
     /// @param beneficiary address to view claimable token amount of
     function claimAmountPika(address beneficiary) public view returns (uint256) {
@@ -249,7 +288,9 @@ contract PikaTokenGeneration is ReentrancyGuard {
             userClaimablePika = pikaForWl.mul(userDepoWl).div(weiDepositedWhitelist);
         }
         if (userDepoPub > 0) {
-            userClaimablePika = userClaimablePika.add(pikaForPublic.mul(userDepoPub).div(totalDepoPublic));
+            uint256 userClaimablePikaPublic = Math.min(pikaForPublic.mul(userDepoPub).div(totalDepoPublic),
+                pikaForWl.mul(userDepoPub).div(weiDepositedWhitelist));
+            userClaimablePika = userClaimablePika.add(userClaimablePikaPublic);
         }
         return userClaimablePika;
     }
