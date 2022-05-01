@@ -296,7 +296,7 @@ contract PikaPerpV3 is ReentrancyGuard {
         require(leverage <= uint256(product.maxLeverage), "!max-leverage");
 
         // Transfer margin plus fee
-        uint256 tradeFee = PerpLib._getTradeFee(margin, leverage, uint256(product.fee), product.productToken, user, feeCalculator);
+        uint256 tradeFee = PerpLib._getTradeFee(margin, leverage, uint256(product.fee), product.productToken, user, msg.sender, feeCalculator);
         IERC20(token).uniTransferFromSenderToThis((margin.add(tradeFee)).mul(tokenBase).div(BASE));
         pendingProtocolReward = pendingProtocolReward.add(tradeFee.mul(protocolRewardRatio).div(10**4));
         pendingPikaReward = pendingPikaReward.add(tradeFee.mul(pikaRewardRatio).div(10**4));
@@ -744,7 +744,7 @@ contract PikaPerpV3 is ReentrancyGuard {
         address productToken
     ) private view returns(int256 pnlAfterFee, uint256 totalFee) {
         // Subtract trade fee from P/L
-        uint256 tradeFee = PerpLib._getTradeFee(margin, uint256(position.leverage), fee, productToken, position.owner, feeCalculator);
+        uint256 tradeFee = PerpLib._getTradeFee(margin, uint256(position.leverage), fee, productToken, position.owner, msg.sender, feeCalculator);
         pnlAfterFee = pnl.sub(int256(tradeFee));
 
         // Subtract interest from P/L
@@ -809,6 +809,7 @@ contract PikaPerpV3 is ReentrancyGuard {
         product.interest = _product.interest;
         product.liquidationThreshold = _product.liquidationThreshold;
         product.liquidationBounty = _product.liquidationBounty;
+        product.minPriceChange = _product.minPriceChange;
         totalWeight = totalWeight - product.weight + _product.weight;
         product.weight = _product.weight;
 

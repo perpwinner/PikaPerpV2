@@ -555,8 +555,7 @@ contract OrderBook is ReentrancyGuard {
 
     function getTradeFeeRate(uint256 _productId, uint256 _margin, uint256 _leverage, address _account) private returns(uint256) {
         (address productToken,,uint256 fee,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
-        int256 dynamicFee = IFeeCalculator(feeCalculator).getFee(productToken, _account);
-        return dynamicFee > 0 ? fee + uint256(dynamicFee) : fee - uint256(-1*dynamicFee);
+        return IFeeCalculator(feeCalculator).getFee(productToken, fee, _account, msg.sender);
     }
 
     fallback() external payable {}

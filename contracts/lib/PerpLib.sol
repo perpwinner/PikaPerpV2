@@ -87,13 +87,13 @@ library PerpLib {
     function _getTradeFee(
         uint256 margin,
         uint256 leverage,
-        uint256 fee,
+        uint256 productFee,
         address productToken,
         address user,
+        address sender,
         address feeCalculator
     ) internal view returns(uint256) {
-        int256 dynamicFee = IFeeCalculator(feeCalculator).getFee(productToken, user);
-        fee = dynamicFee > 0 ? fee + uint256(dynamicFee) : fee - uint256(-1*dynamicFee);
+        uint256 fee = IFeeCalculator(feeCalculator).getFee(productToken, productFee, user, sender);
         return margin * leverage / BASE * fee / 10**4;
     }
 }

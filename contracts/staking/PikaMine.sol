@@ -40,7 +40,7 @@ contract PikaMine is Initializable {
     uint256 public constant TWELVE_MONTHS = 365 days;
     uint256 public constant ONE = 1e18;
 
-    // Magic token addr
+    // Pika token addr
     IERC20Upgradeable public pika;
 
     bool public unlockAll;

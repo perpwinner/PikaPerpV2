@@ -24,7 +24,7 @@ function assertAlmostEqual(actual, expected, accuracy = 100000) {
 
 describe("PikaMine", function () {
     let pika, esPika, vePika, pikaMine, vePikaFeeReward, vePikaTokenReward, testPikaPerp, owner, alice, bob, usdc;
-    before(async function () {
+    beforeEach(async function () {
         this.wallets = provider.getWallets()
         owner = this.wallets[0]
         alice = this.wallets[1]
@@ -123,6 +123,24 @@ describe("PikaMine", function () {
             await pikaMine.connect(alice).withdraw("1000000000000000000000", 3);
             assertAlmostEqual((await pika.balanceOf(alice.address)).sub(beforeWithdrawAlice), "1000000000000000000000")
 
+        })
+
+        it("unlock", async function () {
+            vePikaTokenReward.connect(owner).queueNewRewards("1000000000000000000000"); //1000 esPika
+
+            await pika.connect(alice).approve(pikaMine.address, "100000000000000000000000")
+            await pika.connect(bob).approve(pikaMine.address, "100000000000000000000000")
+            await pikaMine.connect(alice).deposit("1000000000000000000000", 1)
+
+            expect(await pikaMine.unlockedAll(bob.address)).to.be.equal("0")
+
+            await pikaMine.connect(owner).toggleUnlockAll()
+            expect(await pikaMine.unlockAll()).to.equal(true)
+            expect(await pikaMine.unlockedAll(alice.address)).to.equal("1000000000000000000000")
+
+            const beforeWithdrawAlice = await pika.balanceOf(alice.address)
+            await pikaMine.connect(alice).withdrawAll();
+            assertAlmostEqual((await pika.balanceOf(alice.address)).sub(beforeWithdrawAlice), "1000000000000000000000")
         })
     })
 })
