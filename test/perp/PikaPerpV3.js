@@ -164,20 +164,20 @@ describe("Trading", () => {
 		await expect(trading.connect(addrs[1]).setOwner(addrs[1].address)).to.be.revertedWith('!owner');
 	});
 
-	it("Owner should setMargin", async () => {
-		await trading.setMargin("1000000000", "10000000000000");
-		expect(await trading.minMargin()).to.equal("1000000000");
-		expect(await trading.maxPositionMargin()).to.equal("10000000000000");
-		await trading.setMargin("10000000000", "10000000000000");
-	});
+	// it("Owner should setMargin", async () => {
+	// 	await trading.setMargin("1000000000", "10000000000000");
+	// 	expect(await trading.minMargin()).to.equal("1000000000");
+	// 	expect(await trading.maxPositionMargin()).to.equal("10000000000000");
+	// 	await trading.setMargin("10000000000", "10000000000000");
+	// });
 
 	it("Owner should setMaxShift", async () => {
-		await trading.setParameters("1000000", "86400", true, true, "10000", "10000");
+		await trading.setParameters("1000000", "86400", true, true, "10000", "10000", "2");
 		expect(await trading.maxShift()).to.equal("1000000");
 		expect(await trading.minProfitTime()).to.equal("86400");
-		expect(await trading.exposureMultiplier()).to.equal("10000");
-		expect(await trading.utilizationMultiplier()).to.equal("10000");
-		await trading.setParameters("300000", "43200", true, true, "10000", "10000");
+		// expect(await trading.exposureMultiplier()).to.equal("10000");
+		// expect(await trading.utilizationMultiplier()).to.equal("10000");
+		await trading.setParameters("300000", "43200", true, true, "10000", "10000", "2");
 	});
 
 	describe("trade", () => {
@@ -208,7 +208,7 @@ describe("Trading", () => {
 			const price1 = _calculatePrice(oracle.address, true, 0, 0, parseFloat((await trading.getVault()).balance), 50000000e8, margin*leverage/1e8);
 			// console.log("price 1", price1);
 			let fee = margin*leverage/1e8*0.001;
-			const tx1 = await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString());
+			const tx1 = await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString(), "0");
 			const receipt = await provider.getTransactionReceipt(tx1.hash);
 
 			let positionId = getPositionId(user, productId, true);
@@ -219,10 +219,9 @@ describe("Trading", () => {
 
 			assertAlmostEqual(await usdc.balanceOf(user), (balance_user - margin/100 - fee/100).toLocaleString('fullwide', {useGrouping:false}))
 			assertAlmostEqual(await usdc.balanceOf(trading.address), (balance_contract.add(BigNumber.from(margin/100 + fee/100))))
-			// console.log("fee", (await trading.pendingProtocolReward()).toString(), fee/100*0.2)
-			assertAlmostEqual(await trading.pendingProtocolReward(), fee*0.2);
-			assertAlmostEqual(await trading.pendingPikaReward(), fee*0.3);
-			assertAlmostEqual(await trading.pendingVaultReward(), fee*0.5);
+			assertAlmostEqual((await trading.getPendingProtocolReward()).mul("100"), fee*0.2);
+			assertAlmostEqual((await trading.getPendingPikaReward()).mul("100"), fee*0.3);
+			assertAlmostEqual((await trading.getPendingVaultReward()).mul("100"), fee*0.5);
 
 			// // Check user positions
 			const position1 = (await trading.getPositions([positionId]))[0];
@@ -237,7 +236,7 @@ describe("Trading", () => {
 			// 2. increase position
 			const leverage2 = parseUnits(20)
 			const price2 = _calculatePrice(oracle.address, true, margin*leverage/1e8, 0, parseFloat((await trading.getVault()).balance), 50000000e8, margin*leverage2/1e8);
-			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage2.toString());
+			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage2.toString(), "0");
 			const position2 = (await trading.getPositions([positionId]))[0];
 			expect(position2.margin).to.equal(margin*2);
 			expect(position2.leverage).to.equal(leverage*1.5);
@@ -250,7 +249,7 @@ describe("Trading", () => {
 			const price3 = _calculatePrice(oracle.address, false, 3*margin*leverage/1e8, 0, parseFloat((await trading.getVault()).balance), 50000000e8, 3*margin*leverage/1e8);
 			await oracle.setPrice(3029e8);
 			const totalFee = parseInt(3*margin*leverage/1e8*0.001 + getInterestFee(3*margin, leverage, 0, 500));
-			const tx3 = await trading.connect(addrs[userId]).closePositionWithId(positionId, 3*margin);
+			const tx3 = await trading.connect(addrs[userId]).closePositionWithId(positionId, 3*margin, "0");
 			expect(await tx3).to.emit(trading, "ClosePosition").withArgs(positionId, user, productId, price3.toString(), position2.price, (2*margin).toString(), (leverage*1.5).toString(), totalFee.toString(), 0, false);
 			// console.log("after close long", (await usdc.balanceOf(trading.address)).toString());
 			// console.log("vault balance", (await trading.getVault()).balance.toString());
@@ -266,7 +265,7 @@ describe("Trading", () => {
 			// 1. open long
 			const price1 = _calculatePrice(oracle.address, true, 0, 0, parseFloat((await trading.getVault()).balance), 50000000e8, margin*leverage/1e8);
 			let fee = margin*leverage/1e8*0.001;
-			const tx1 = await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString());
+			const tx1 = await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString(), "0");
 			const receipt = await provider.getTransactionReceipt(tx1.hash);
 
 			let positionId = getPositionId(user, productId, true);
@@ -292,11 +291,11 @@ describe("Trading", () => {
 			latestPrice = 3029e8;
 			const price3 = _calculatePrice(oracle.address, false, margin*leverage/1e8, 0, parseFloat((await trading.getVault()).balance), 50000000e8, margin/2*leverage/1e8);
 			await oracle.setPrice(3029e8);
-			const tx3 = await trading.connect(addrs[userId]).closePositionWithId(positionId, margin/2);
+			const tx3 = await trading.connect(addrs[userId]).closePositionWithId(positionId, margin/2, "0");
 			// expect(await tx3).to.emit(trading, "ClosePosition").withArgs(positionId, user, productId, false, price3.toString(), position1.price, (margin/2).toString(), leverage.toString(), 0, true, false);
 			// assertAlmostEqual(await usdc.balanceOf(user),  (newUserBalance - margin/200 - fee/200).toLocaleString('fullwide', {useGrouping:false}))
 			// assertAlmostEqual(await usdc.balanceOf(trading.address), newContractBalance.add(BigNumber.from(margin/200 + fee/200)))
-			await trading.connect(addrs[userId]).closePositionWithId(positionId, margin/2);
+			await trading.connect(addrs[userId]).closePositionWithId(positionId, margin/2, "0");
 		});
 
 		it(`short positions`, async () => {
@@ -309,7 +308,7 @@ describe("Trading", () => {
 			// 1. open short
 			const price1 = _calculatePrice(oracle.address, false, 0, 0, parseFloat((await trading.getVault()).balance), 50000000e8, margin*leverage/1e8);
 			let fee = margin*leverage/1e8*0.001;
-			const tx1 = await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, false, leverage.toString());
+			const tx1 = await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, false, leverage.toString(), "0");
 			let positionId = getPositionId(user, productId, false, false);
 			expect(await tx1).to.emit(trading, "NewPosition").withArgs(positionId, user, productId, false, price1.toString(), getOraclePrice(oracle.address), margin.toString(), leverage.toString(), margin*leverage/1e8*0.001);
 
@@ -330,7 +329,7 @@ describe("Trading", () => {
 			// 2. increase position
 			const leverage2 = parseUnits(20)
 			const price2 = _calculatePrice(oracle.address, false, 0, margin*leverage/1e8, parseFloat((await trading.getVault()).balance), 50000000e8, margin*leverage2/1e8);
-			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, false, leverage2.toString());
+			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, false, leverage2.toString(), "0");
 			const position2 = (await trading.getPositions([positionId]))[0];
 			expect(position2.margin).to.equal(margin*2);
 			expect(position2.leverage).to.equal(leverage*1.5);
@@ -346,7 +345,7 @@ describe("Trading", () => {
 			await oracle.setPrice(3000e8);
 			// await trading.setFees(0.01e8, 0);
 			// const tx3 = await trading.connect(addrs[userId]).closePosition(positionId, 3*margin);
-			const tx3 = await trading.connect(addrs[userId]).closePosition(addrs[userId].address, 1, 3*margin, false);
+			const tx3 = await trading.connect(addrs[userId]).closePosition(addrs[userId].address, 1, 3*margin, false, "0");
 			// console.log("after close short", (await usdc.balanceOf(trading.address)).toString());
 			// console.log("vault balance", (await trading.getVault()).balance.toString());
 			const totalFee = 3*margin*leverage/1e8*0.001 + getInterestFee(3*margin, leverage, 0, 200);
@@ -367,7 +366,7 @@ describe("Trading", () => {
 			await oracle.setPrice(3000e8);
 			const price1 = _calculatePrice(oracle.address, true, 0, 0, parseFloat((await trading.getVault()).balance), 50000000e8, margin*leverage/1e8);
 			let fee = margin*leverage/1e8*0.001;
-			const tx1 = await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString());
+			const tx1 = await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString(), "0");
 
 			let positionId = getPositionId(user, productId, true);
 			expect(await tx1).to.emit(trading, "NewPosition").withArgs(positionId, user, productId, true, price1.toString(), getOraclePrice(oracle.address), margin.toString(), leverage.toString(), margin*leverage/1e8*0.001);
@@ -391,7 +390,7 @@ describe("Trading", () => {
 			latestPrice = 2760e8;
 			// const price3 = _calculatePriceWithFee(oracle.address, 10, false, margin*leverage/1e8, 0, 100000000e8, 50000000e8, margin*leverage/1e8);
 			await oracle.setPrice(2760e8);
-			await trading.setParameters("300000", "43200", true, true, "10000", "10000");
+			await trading.setParameters("300000", "43200", true, true, "10000", "10000", "2");
 			const tx3 = await trading.connect(addrs[userId]).liquidatePositions([positionId]);
 			const totalFee = getInterestFee(3*margin, leverage, 0, 500);
 			expect(await tx3).to.emit(trading, "ClosePosition").withArgs(positionId, user, productId, latestPrice, position1.price, margin.toString(), leverage.toString(), totalFee, (-1*margin).toString(), true);
@@ -405,7 +404,7 @@ describe("Trading", () => {
 			// console.log(vault1.staked.toString())
 			// console.log("Vault1 balance", vault1.balance.toString())
 			// console.log(vault1.shares.toString())
-			await trading.setParameters("300000", "43200", true, true, "10000", "10000");
+			await trading.setParameters("300000", "43200", true, true, "10000", "10000", "2");
 			const amount = 1000000000000;
 			await trading.connect(addrs[1]).stake(amount, addrs[1].address);
 
@@ -440,13 +439,13 @@ describe("Trading", () => {
 			const startOwnerClaimableReward = await vaultFeeReward.getClaimableReward(owner.address);
 			const startAddress1ClaimableReward = await vaultFeeReward.getClaimableReward(addrs[1].address);
 			await trading.connect(owner).stake("10000000000000", owner.address);
-			await trading.connect(owner).openPosition(owner.address, productId, margin, true, leverage.toString());
+			await trading.connect(owner).openPosition(owner.address, productId, margin, true, leverage.toString(), "0");
 			expect((await vaultFeeReward.getClaimableReward(owner.address)).sub(startOwnerClaimableReward)).to.be.equal("5000000");
 			await trading.connect(addrs[1]).stake("10000000000000", addrs[1].address);
 			expect((await vaultFeeReward.getClaimableReward(addrs[1].address)).sub(startAddress1ClaimableReward)).to.be.equal("0");
 			expect(await trading.getTotalShare()).to.be.equal("20000000000000");
 
-			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString());
+			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString(), "0");
 
 			expect((await vaultFeeReward.getClaimableReward(owner.address)).sub(startOwnerClaimableReward)).to.be.equal("7500000");
 			expect((await vaultFeeReward.getClaimableReward(addrs[1].address)).sub(startAddress1ClaimableReward)).to.be.equal("2500000");
@@ -466,8 +465,8 @@ describe("Trading", () => {
 			await vaultFeeReward.connect(addrs[1]).claimReward();
 			expect((await usdc.balanceOf(addrs[1].address)).sub(usdcBeforeClaim2)).to.be.equal(currentClaimableRewardAddrs1);
 
-			await trading.connect(owner).closePosition(owner.address, productId, margin, true);
-			await trading.connect(addrs[userId]).closePosition(addrs[userId].address, productId, margin, true);
+			await trading.connect(owner).closePosition(owner.address, productId, margin, true, "0");
+			await trading.connect(addrs[userId]).closePosition(addrs[userId].address, productId, margin, true, "0");
 			await trading.connect(owner).redeem(owner.address, (await trading.getShare(owner.address)), owner.address);
 		})
 

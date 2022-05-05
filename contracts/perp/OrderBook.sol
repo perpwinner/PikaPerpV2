@@ -27,6 +27,7 @@ contract OrderBook is ReentrancyGuard {
         uint256 triggerPrice;
         bool triggerAboveThreshold;
         uint256 executionFee;
+        uint256 orderTimestamp;
     }
     struct CloseOrder {
         address account;
@@ -36,6 +37,7 @@ contract OrderBook is ReentrancyGuard {
         uint256 triggerPrice;
         bool triggerAboveThreshold;
         uint256 executionFee;
+        uint256 orderTimestamp;
     }
 
     mapping (address => mapping(uint256 => OpenOrder)) public openOrders;
@@ -64,7 +66,8 @@ contract OrderBook is ReentrancyGuard {
         bool isLong,
         uint256 triggerPrice,
         bool triggerAboveThreshold,
-        uint256 executionFee
+        uint256 executionFee,
+        uint256 orderTimestamp
     );
     event CancelOpenOrder(
         address indexed account,
@@ -75,7 +78,8 @@ contract OrderBook is ReentrancyGuard {
         bool isLong,
         uint256 triggerPrice,
         bool triggerAboveThreshold,
-        uint256 executionFee
+        uint256 executionFee,
+        uint256 orderTimestamp
     );
     event ExecuteOpenOrder(
         address indexed account,
@@ -87,7 +91,8 @@ contract OrderBook is ReentrancyGuard {
         uint256 triggerPrice,
         bool triggerAboveThreshold,
         uint256 executionFee,
-        uint256 executionPrice
+        uint256 executionPrice,
+        uint256 orderTimestamp
     );
     event UpdateOpenOrder(
         address indexed account,
@@ -97,7 +102,8 @@ contract OrderBook is ReentrancyGuard {
         uint256 leverage,
         bool isLong,
         uint256 triggerPrice,
-        bool triggerAboveThreshold
+        bool triggerAboveThreshold,
+        uint256 orderTimestamp
     );
     event CreateCloseOrder(
         address indexed account,
@@ -107,7 +113,8 @@ contract OrderBook is ReentrancyGuard {
         bool isLong,
         uint256 triggerPrice,
         bool triggerAboveThreshold,
-        uint256 executionFee
+        uint256 executionFee,
+        uint256 orderTimestamp
     );
     event CancelCloseOrder(
         address indexed account,
@@ -117,7 +124,8 @@ contract OrderBook is ReentrancyGuard {
         bool isLong,
         uint256 triggerPrice,
         bool triggerAboveThreshold,
-        uint256 executionFee
+        uint256 executionFee,
+        uint256 orderTimestamp
     );
     event ExecuteCloseOrder(
         address indexed account,
@@ -128,7 +136,8 @@ contract OrderBook is ReentrancyGuard {
         uint256 triggerPrice,
         bool triggerAboveThreshold,
         uint256 executionFee,
-        uint256 executionPrice
+        uint256 executionPrice,
+        uint256 orderTimestamp
     );
     event UpdateCloseOrder(
         address indexed account,
@@ -137,7 +146,8 @@ contract OrderBook is ReentrancyGuard {
         uint256 size,
         bool isLong,
         uint256 triggerPrice,
-        bool triggerAboveThreshold
+        bool triggerAboveThreshold,
+        uint256 orderTimestamp
     );
 
     event UpdateMargin(uint256 minMargin, uint256 maxMargin);
@@ -237,7 +247,8 @@ contract OrderBook is ReentrancyGuard {
         bool isLong,
         uint256 triggerPrice,
         bool triggerAboveThreshold,
-        uint256 executionFee
+        uint256 executionFee,
+        uint256 orderTimestamp
     ) {
         CloseOrder memory order = closeOrders[_account][_orderIndex];
         return (
@@ -246,7 +257,8 @@ contract OrderBook is ReentrancyGuard {
         order.isLong,
         order.triggerPrice,
         order.triggerAboveThreshold,
-        order.executionFee
+        order.executionFee,
+        order.orderTimestamp
         );
     }
 
@@ -257,7 +269,8 @@ contract OrderBook is ReentrancyGuard {
         bool isLong,
         uint256 triggerPrice,
         bool triggerAboveThreshold,
-        uint256 executionFee
+        uint256 executionFee,
+        uint256 orderTimestamp
     ) {
         OpenOrder memory order = openOrders[_account][_orderIndex];
         return (
@@ -267,7 +280,8 @@ contract OrderBook is ReentrancyGuard {
         order.isLong,
         order.triggerPrice,
         order.triggerAboveThreshold,
-        order.executionFee
+        order.executionFee,
+        order.orderTimestamp
         );
     }
 
@@ -321,7 +335,8 @@ contract OrderBook is ReentrancyGuard {
             _isLong,
             _triggerPrice,
             _triggerAboveThreshold,
-            _executionFee
+            _executionFee,
+            block.timestamp
         );
         openOrdersIndex[_account] = _orderIndex.add(1);
         openOrders[_account][_orderIndex] = order;
@@ -334,7 +349,8 @@ contract OrderBook is ReentrancyGuard {
             _isLong,
             _triggerPrice,
             _triggerAboveThreshold,
-            _executionFee
+            _executionFee,
+            block.timestamp
         );
     }
 
@@ -351,6 +367,7 @@ contract OrderBook is ReentrancyGuard {
         order.leverage = _leverage;
         order.triggerPrice = _triggerPrice;
         order.triggerAboveThreshold = _triggerAboveThreshold;
+        order.orderTimestamp = block.timestamp;
 
         emit UpdateOpenOrder(
             msg.sender,
@@ -360,7 +377,8 @@ contract OrderBook is ReentrancyGuard {
             _leverage,
             order.isLong,
             _triggerPrice,
-            _triggerAboveThreshold
+            _triggerAboveThreshold,
+            block.timestamp
         );
     }
 
@@ -386,7 +404,8 @@ contract OrderBook is ReentrancyGuard {
             order.isLong,
             order.triggerPrice,
             order.triggerAboveThreshold,
-            order.executionFee
+            order.executionFee,
+            order.orderTimestamp
         );
     }
 
@@ -404,11 +423,11 @@ contract OrderBook is ReentrancyGuard {
         // deduct trading fee from margin
         uint256 margin = order.margin * BASE / (BASE + getTradeFeeRate(order.productId, order.margin, order.leverage, order.account) * order.leverage / 10**4);
         if (IERC20(collateralToken).isETH()) {
-            IPikaPerp(pikaPerp).openPosition{value: order.margin * tokenBase / BASE }(_address, order.productId, margin, order.isLong, order.leverage);
+            IPikaPerp(pikaPerp).openPosition{value: order.margin * tokenBase / BASE }(_address, order.productId, margin, order.isLong, order.leverage, order.orderTimestamp);
         } else {
             IERC20(collateralToken).safeApprove(pikaPerp, 0);
             IERC20(collateralToken).safeApprove(pikaPerp, order.margin * tokenBase / BASE);
-            IPikaPerp(pikaPerp).openPosition(_address, order.productId, margin, order.isLong, order.leverage);
+            IPikaPerp(pikaPerp).openPosition(_address, order.productId, margin, order.isLong, order.leverage, order.orderTimestamp);
         }
 
         // pay executor
@@ -424,7 +443,8 @@ contract OrderBook is ReentrancyGuard {
             order.triggerPrice,
             order.triggerAboveThreshold,
             order.executionFee,
-            currentPrice
+            currentPrice,
+            order.orderTimestamp
         );
     }
 
@@ -463,7 +483,8 @@ contract OrderBook is ReentrancyGuard {
             _isLong,
             _triggerPrice,
             _triggerAboveThreshold,
-            msg.value * BASE / 1e18
+            msg.value * BASE / 1e18,
+            block.timestamp
         );
         closeOrdersIndex[_account] = _orderIndex.add(1);
         closeOrders[_account][_orderIndex] = order;
@@ -476,7 +497,8 @@ contract OrderBook is ReentrancyGuard {
             _isLong,
             _triggerPrice,
             _triggerAboveThreshold,
-            msg.value
+            msg.value,
+            block.timestamp
         );
     }
 
@@ -491,7 +513,7 @@ contract OrderBook is ReentrancyGuard {
         );
 
         delete closeOrders[_address][_orderIndex];
-        IPikaPerp(pikaPerp).closePosition(_address, order.productId, order.size * BASE / leverage , order.isLong);
+        IPikaPerp(pikaPerp).closePosition(_address, order.productId, order.size * BASE / leverage , order.isLong, order.orderTimestamp);
 
         // pay executor
         _feeReceiver.sendValue(order.executionFee * 1e18 / BASE);
@@ -505,7 +527,8 @@ contract OrderBook is ReentrancyGuard {
             order.triggerPrice,
             order.triggerAboveThreshold,
             order.executionFee,
-            currentPrice
+            currentPrice,
+            order.orderTimestamp
         );
     }
 
@@ -525,7 +548,8 @@ contract OrderBook is ReentrancyGuard {
             order.isLong,
             order.triggerPrice,
             order.triggerAboveThreshold,
-            order.executionFee
+            order.executionFee,
+            order.orderTimestamp
         );
     }
 
@@ -541,6 +565,7 @@ contract OrderBook is ReentrancyGuard {
         order.size = _size;
         order.triggerPrice = _triggerPrice;
         order.triggerAboveThreshold = _triggerAboveThreshold;
+        order.orderTimestamp = block.timestamp;
 
         emit UpdateCloseOrder(
             msg.sender,
@@ -549,7 +574,8 @@ contract OrderBook is ReentrancyGuard {
             _size,
             order.isLong,
             _triggerPrice,
-            _triggerAboveThreshold
+            _triggerAboveThreshold,
+            block.timestamp
         );
     }
 

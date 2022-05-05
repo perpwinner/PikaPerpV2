@@ -18,17 +18,20 @@ interface IPikaPerp {
         uint256 productId,
         uint256 margin,
         bool isLong,
-        uint256 leverage
-    ) external payable returns(uint256 positionId);
+        uint256 leverage,
+        uint256 orderTimestamp
+    ) external payable;
     function closePositionWithId(
         uint256 positionId,
-        uint256 margin
+        uint256 margin,
+        uint256 orderTimestamp
     ) external;
     function closePosition(
         address user,
         uint256 productId,
         uint256 margin,
-        bool isLong
+        bool isLong,
+        uint256 orderTimestamp
     ) external;
     function getProduct(uint256 productId) external view returns (
         address,uint256,uint256,bool,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256);
