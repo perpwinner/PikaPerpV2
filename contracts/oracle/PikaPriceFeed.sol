@@ -12,16 +12,16 @@ contract PikaPriceFeed is Ownable {
     uint256 public priceDuration = 300; // 5mins
     mapping (address => uint256) public priceMap;
     mapping (address => address) public tokenFeedMap;
+    mapping (address => uint256) public maxPriceDiff;
     mapping(address => bool) public keepers;
     bool public isChainlinkOnly = false;
     bool public isPikaOracleOnly = false;
-    uint256 public maxPriceDiff = 2e16; // 2%
     uint256 public delta = 20; // 20bp
     uint256 public decay = 9000; // 0.9
 
     event PriceSet(address token, uint256 price, uint256 timestamp);
     event PriceDurationSet(uint256 priceDuration);
-    event MaxPriceDiffSet(uint256 maxPriceDiff);
+    event MaxPriceDiffSet(address token, uint256 maxPriceDiff);
     event KeeperSet(address keeper, bool isActive);
     event DeltaAndDecaySet(uint256 delta, uint256 decay);
     event IsChainlinkOnlySet(bool isChainlinkOnlySet);
@@ -42,7 +42,7 @@ contract PikaPriceFeed is Ownable {
         uint256 pikaPrice = priceMap[token];
         uint256 priceDiff = pikaPrice > chainlinkPrice ? (pikaPrice.sub(chainlinkPrice)).mul(1e18).div(chainlinkPrice) :
             (chainlinkPrice.sub(pikaPrice)).mul(1e18).div(chainlinkPrice);
-        if (priceDiff > maxPriceDiff) {
+        if (priceDiff > maxPriceDiff[token]) {
             return chainlinkPrice;
         }
         return pikaPrice;
@@ -118,9 +118,10 @@ contract PikaPriceFeed is Ownable {
         }
     }
 
-    function setMaxPriceDiff(uint256 _maxPriceDiff) external onlyOwner {
-        maxPriceDiff = _maxPriceDiff;
-        emit MaxPriceDiffSet(maxPriceDiff);
+    function setMaxPriceDiff(address _token, uint256 _maxPriceDiff) external onlyOwner {
+        require(_maxPriceDiff < 3e16, "too big"); // must be smaller than 3%
+        maxPriceDiff[_token] = _maxPriceDiff;
+        emit MaxPriceDiffSet(_token, _maxPriceDiff);
     }
 
     function setKeeper(address _keeper, bool _isActive) external onlyOwner {

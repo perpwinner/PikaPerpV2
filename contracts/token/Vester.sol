@@ -85,7 +85,6 @@ contract Vester is Ownable {
      * @notice Claim PIKA token from vesting. If the vesting is not completed, it is attached a fee,
      * which decreases linearly to 0 at the vesting completion time. The deposited esPIKA token is burned and
      * the fee is transferred to the treasury.
-     * @return amount of PIKA token claimable
      */
     function claim(uint256 _depositId) public {
         UserInfo storage user = userInfo[msg.sender][_depositId];
