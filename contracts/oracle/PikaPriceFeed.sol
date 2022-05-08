@@ -11,7 +11,6 @@ contract PikaPriceFeed is Ownable {
     uint256 public lastUpdatedTime;
     uint256 public priceDuration = 300; // 5mins
     mapping (address => uint256) public priceMap;
-    mapping (address => address) public tokenFeedMap;
     mapping (address => uint256) public maxPriceDiff;
     mapping(address => bool) public keepers;
     bool public isChainlinkOnly = false;
@@ -36,7 +35,7 @@ contract PikaPriceFeed is Ownable {
 
     function getPrice(address token) public view returns (uint256) {
         (uint256 chainlinkPrice, uint256 chainlinkTimestamp) = getChainlinkPrice(token);
-        if (isChainlinkOnly || !isPikaOracleOnly && (block.timestamp > lastUpdatedTime.add(priceDuration) && chainlinkTimestamp > lastUpdatedTime)) {
+        if (isChainlinkOnly || (!isPikaOracleOnly && (block.timestamp > lastUpdatedTime.add(priceDuration) && chainlinkTimestamp > lastUpdatedTime))) {
             return chainlinkPrice;
         }
         uint256 pikaPrice = priceMap[token];
@@ -49,14 +48,13 @@ contract PikaPriceFeed is Ownable {
     }
 
     function getChainlinkPrice(address token) public view returns (uint256 priceToReturn, uint256 chainlinkTimestamp) {
-        address feed = tokenFeedMap[token];
-        require(feed != address(0), '!feed-error');
+        require(token != address(0), '!feed-error');
 
-        (,int256 price,,uint256 timeStamp,) = AggregatorV3Interface(feed).latestRoundData();
+        (,int256 price,,uint256 timeStamp,) = AggregatorV3Interface(token).latestRoundData();
 
         require(price > 0, '!price');
         require(timeStamp > 0, '!timeStamp');
-        uint8 decimals = AggregatorV3Interface(feed).decimals();
+        uint8 decimals = AggregatorV3Interface(token).decimals();
         chainlinkTimestamp = timeStamp;
         if (decimals != 8) {
             priceToReturn = uint256(price) * (10**8) / (10**uint256(decimals));
@@ -65,24 +63,23 @@ contract PikaPriceFeed is Ownable {
         }
     }
 
-    function getPrices(address[] memory feeds) external view returns (uint256[] memory){
-        uint256[] memory curPrices = new uint256[](feeds.length);
-        for (uint256 i = 0; i < feeds.length; i++) {
-            curPrices[i] = getPrice(feeds[i]);
+    function getPrices(address[] memory tokens) external view returns (uint256[] memory){
+        uint256[] memory curPrices = new uint256[](tokens.length);
+        for (uint256 i = 0; i < tokens.length; i++) {
+            curPrices[i] = getPrice(tokens[i]);
         }
         return curPrices;
     }
 
     function getLastNPrices(address token, uint256 n) external view returns(uint256[] memory) {
-        address feed = tokenFeedMap[token];
-        require(feed != address(0), '!feed-error');
+        require(token != address(0), '!feed-error');
 
         uint256[] memory prices = new uint256[](n);
-        uint8 decimals = AggregatorV3Interface(feed).decimals();
-        (uint80 roundId,,,,) = AggregatorV3Interface(feed).latestRoundData();
+        uint8 decimals = AggregatorV3Interface(token).decimals();
+        (uint80 roundId,,,,) = AggregatorV3Interface(token).latestRoundData();
 
         for (uint256 i = 0; i < n; i++) {
-            (,int256 price,,,) = AggregatorV3Interface(feed).getRoundData(roundId - uint80(i));
+            (,int256 price,,,) = AggregatorV3Interface(token).getRoundData(roundId - uint80(i));
             require(price > 0, '!price');
             uint256 priceToReturn;
             if (decimals != 8) {
@@ -109,13 +106,6 @@ contract PikaPriceFeed is Ownable {
         require(_priceDuration <= MAX_PRICE_DURATION, "!priceDuration");
         priceDuration = _priceDuration;
         emit PriceDurationSet(priceDuration);
-    }
-
-    function setFeedForToken(address[] memory feeds, address[] memory tokens) external onlyOwner {
-        require(feeds.length == tokens.length, "!length");
-        for (uint256 i = 0; i < tokens.length; i++) {
-            tokenFeedMap[tokens[i]] = feeds[i];
-        }
     }
 
     function setMaxPriceDiff(address _token, uint256 _maxPriceDiff) external onlyOwner {
