@@ -2,6 +2,7 @@ require("@nomiclabs/hardhat-waffle");
 require('@openzeppelin/hardhat-upgrades');
 require("@nomiclabs/hardhat-web3");
 require("@nomiclabs/hardhat-etherscan");
+require('hardhat-contract-sizer');
 // require("hardhat-gas-reporter");
 const { infuraApiKey, mnemonic, etherscanApiKey, opkovankey } = require('./secrets.json');
 

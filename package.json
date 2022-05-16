@@ -14,6 +14,7 @@
     "ethereum-waffle": "^3.3.0",
     "ethers": "^5.1.2",
     "hardhat": "^2.9.3",
+    "hardhat-contract-sizer": "^2.5.1",
     "hardhat-gas-reporter": "^1.0.4",
     "mocha": "^7.0.0",
     "solidity-coverage": "^0.7.16",
@@ -26,6 +27,7 @@
     "@openzeppelin/contracts-upgradeable": "^4.5.2",
     "bn.js": "^5.2.0",
     "keccak256": "^1.0.3",
+    "merkletreejs": "^0.2.31",
     "web3-utils": "^1.3.5"
   }
 }

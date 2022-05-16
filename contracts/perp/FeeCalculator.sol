@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/utils/math/SignedSafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -20,6 +19,19 @@ contract FeeCalculator is Ownable {
     bool public isDiscountEnabled = false;
     mapping (address => uint256) public accountFeeDiscount;
     mapping (address => uint256) public senderFeeDiscount;
+
+    uint256 public MAX_DYNAMIC_FEE = 200; // 2%
+    uint256 public MAX_ACCOUNT_DISCOUNT = 5000; // 50%
+    uint256 public MAX_SENDER_DISCOUNT = 9000; // 90%
+
+    event SetThreshold(uint256 threshold);
+    event SetWeightDecay(uint256 weightDecay);
+    event SetN(uint256 n);
+    event SetIsDynamicFee(bool isDynamicFee);
+    event SetIsDiscountEnabled(bool isDiscountEnabled);
+    event SetMaxDynamicFee(uint256 maxDynamicFee);
+    event SetDiscountForAccount(address account, uint256 discount);
+    event SetDiscountForSender(address sender, uint256 discount);
 
     constructor(uint256 _threshold, uint256 _weightDecay, address _oracle) public {
         threshold = _threshold;
@@ -79,34 +91,45 @@ contract FeeCalculator is Ownable {
 
     function setThreshold(uint256 _threshold) external onlyOwner {
         threshold = _threshold;
+        emit SetThreshold(_threshold);
     }
 
     function setWeightDecay(uint256 _weightDecay) external onlyOwner {
         weightDecay = _weightDecay;
+        emit SetWeightDecay(_weightDecay);
     }
 
     function setN(uint256 _n) external onlyOwner {
         n = _n;
+        emit SetN(n);
     }
 
     function setIsDynamicFee(bool _isDynamicFee) external onlyOwner {
         isDynamicFee = _isDynamicFee;
+        emit SetIsDynamicFee(_isDynamicFee);
     }
 
     function setIsDiscountEnabled(bool _isDiscountEnabled) external onlyOwner {
         isDiscountEnabled = _isDiscountEnabled;
+        emit SetIsDiscountEnabled(_isDiscountEnabled);
     }
 
     function setMaxDynamicFee(uint256 _maxDynamicFee) external onlyOwner {
+        require(_maxDynamicFee <= MAX_DYNAMIC_FEE);
         maxDynamicFee = _maxDynamicFee;
+        emit SetMaxDynamicFee(_maxDynamicFee);
     }
 
     function setDiscountForAccount(address _account, uint256 _discount) external onlyOwner {
+        require(_discount <= MAX_ACCOUNT_DISCOUNT);
         accountFeeDiscount[_account] = _discount;
+        emit SetDiscountForAccount(_account, _discount);
     }
 
     function setDiscountForSender(address _sender, uint256 _discount) external onlyOwner {
+        require(_discount <= MAX_SENDER_DISCOUNT);
         senderFeeDiscount[_sender] = _discount;
+        emit SetDiscountForSender(_sender, _discount);
     }
 
 }
