@@ -94,6 +94,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     bool private canUserStake = false;
     bool private allowPublicLiquidator = false;
     bool private isTradeEnabled = true;
+    bool private isManagerOnly = false;
     Vault private vault;
     uint256 private constant BASE = 10**8;
 
@@ -199,7 +200,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     // Methods
 
     function stake(uint256 amount, address user) external payable nonReentrant {
-        require((canUserStake || msg.sender == owner) && (msg.sender == user || _validateManager(user)), "!stake");
+        require((canUserStake || msg.sender == owner) && (msg.sender == user || _validateManager(msg.sender)), "!stake");
         IVaultReward(vaultRewardDistributor).updateReward(user);
         IVaultReward(vaultTokenReward).updateReward(user);
         IERC20(token).uniTransferFromSenderToThis(amount * tokenBase / BASE);
@@ -281,10 +282,9 @@ contract PikaPerpV3 is ReentrancyGuard {
         uint256 productId,
         uint256 margin,
         bool isLong,
-        uint256 leverage,
-        uint256 orderTimestamp
+        uint256 leverage
     ) public payable nonReentrant {
-        require(user == msg.sender || _validateManager(user), "!allowed");
+        require(_validateManager(user) || (!isManagerOnly && user == msg.sender), "!allowed");
         require(isTradeEnabled, "!enabled");
         // Check params
         require(margin >= minMargin && margin < type(uint64).max, "!margin");
@@ -303,7 +303,7 @@ contract PikaPerpV3 is ReentrancyGuard {
 
         uint256 price = _calculatePrice(product.productToken, isLong, product.openInterestLong,
             product.openInterestShort, uint256(vault.balance) * uint256(product.weight) * exposureMultiplier / uint256(totalWeight) / (10**4),
-            uint256(product.reserve), margin * leverage / BASE, orderTimestamp);
+            uint256(product.reserve), margin * leverage / BASE);
 
         _updateOpenInterest(productId, margin * leverage / BASE, isLong, true);
 
@@ -321,7 +321,7 @@ contract PikaPerpV3 is ReentrancyGuard {
         margin: uint64(margin),
         leverage: uint64(leverage),
         price: uint64(price),
-        oraclePrice: uint64(!nextPriceManagers[msg.sender] ? IOracle(oracle).getPrice(product.productToken) : IOracle(oracle).getPrice(product.productToken, orderTimestamp)),
+        oraclePrice: uint64(IOracle(oracle).getPrice(product.productToken)),
         timestamp: uint80(block.timestamp),
         averageTimestamp: position.margin == 0 ? uint80(block.timestamp) : uint80((uint256(position.margin) * uint256(position.timestamp) + margin * block.timestamp) / (uint256(position.margin) + margin)),
         isLong: isLong,
@@ -335,7 +335,7 @@ contract PikaPerpV3 is ReentrancyGuard {
             productId,
             isLong,
             price,
-            !nextPriceManagers[msg.sender] ? IOracle(oracle).getPrice(product.productToken) : IOracle(oracle).getPrice(product.productToken, orderTimestamp),
+            IOracle(oracle).getPrice(product.productToken),
             margin,
             leverage,
             tradeFee,
@@ -378,21 +378,19 @@ contract PikaPerpV3 is ReentrancyGuard {
         address user,
         uint256 productId,
         uint256 margin,
-        bool isLong,
-        uint256 orderTimestamp
+        bool isLong
     ) external {
-        return closePositionWithId(getPositionId(user, productId, isLong), margin, orderTimestamp);
+        return closePositionWithId(getPositionId(user, productId, isLong), margin);
     }
 
     // Closes position from Position with id = positionId
     function closePositionWithId(
         uint256 positionId,
-        uint256 margin,
-        uint256 orderTimestamp
+        uint256 margin
     ) public nonReentrant {
         // Check position
         Position storage position = positions[positionId];
-        require(msg.sender == position.owner || _validateManager(position.owner), "!close");
+        require(_validateManager(position.owner) || (!isManagerOnly && msg.sender == position.owner), "!close");
 
         // Check product
         Product storage product = products[uint256(position.productId)];
@@ -404,7 +402,7 @@ contract PikaPerpV3 is ReentrancyGuard {
         }
         uint256 maxExposure = uint256(vault.balance) * uint256(product.weight) * exposureMultiplier / uint256(totalWeight) / (10**4);
         uint256 price = _calculatePrice(product.productToken, !position.isLong, product.openInterestLong, product.openInterestShort,
-            maxExposure, uint256(product.reserve), margin * position.leverage / BASE, orderTimestamp);
+            maxExposure, uint256(product.reserve), margin * position.leverage / BASE);
 
         bool isLiquidatable;
         int256 pnl = PerpLib._getPnl(position.isLong, uint256(position.price), uint256(position.leverage), margin, price);
@@ -586,8 +584,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     }
 
     function _validateManager(address account) private view returns(bool) {
-        require(managers[msg.sender] && approvedManagers[account][msg.sender], "!manager");
-        return true;
+        return managers[msg.sender] && approvedManagers[account][msg.sender];
     }
 
     function distributeProtocolReward() external returns(uint256) {
@@ -717,11 +714,9 @@ contract PikaPerpV3 is ReentrancyGuard {
         uint256 openInterestShort,
         uint256 maxExposure,
         uint256 reserve,
-        uint256 amount,
-        uint256 orderTimestamp
+        uint256 amount
     ) private view returns(uint256) {
-        uint256 oraclePrice = !nextPriceManagers[msg.sender] ? IOracle(oracle).getPrice(productToken) :
-            IOracle(oracle).getPrice(productToken, orderTimestamp);
+        uint256 oraclePrice = isLong ? IOracle(oracle).getPrice(productToken, true) : IOracle(oracle).getPrice(productToken, false);
         int256 shift = (int256(openInterestLong) - int256(openInterestShort)) * int256(maxShift) / int256(maxExposure);
         if (isLong) {
             uint256 slippage = (reserve * reserve / (reserve - amount) - reserve) * BASE / amount;
@@ -860,6 +855,7 @@ contract PikaPerpV3 is ReentrancyGuard {
         uint256 _minProfitTime,
         bool _canUserStake,
         bool _allowPublicLiquidator,
+        bool _isManagerOnly,
         uint256 _exposureMultiplier,
         uint256 _utilizationMultiplier,
         uint256 _shiftDivider
@@ -870,6 +866,7 @@ contract PikaPerpV3 is ReentrancyGuard {
         minProfitTime = _minProfitTime;
         canUserStake = _canUserStake;
         allowPublicLiquidator = _allowPublicLiquidator;
+        isManagerOnly = _isManagerOnly;
         exposureMultiplier = _exposureMultiplier;
         utilizationMultiplier = _utilizationMultiplier;
         shiftDivider = _shiftDivider;

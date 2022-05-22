@@ -15,6 +15,10 @@ contract MockOracle {
         return price;
     }
 
+    function getPrice(address feed, bool isMax) external view returns (uint256)  {
+        return price;
+    }
+
     function getLastNPrices(address token, uint256 n) external view returns(uint256[] memory) {
         uint[] memory prices = new uint[](n);
         return prices;

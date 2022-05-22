@@ -17,14 +17,18 @@ contract PikaPriceFeed is Governable {
     mapping(address => bool) public keepers;
     bool public isChainlinkOnly = false;
     bool public isPikaOracleOnly = false;
+    bool public isSpreadEnabled = false;
     uint256 public delta = 20; // 20bp
     uint256 public decay = 9000; // 0.9
+    uint256 public spread = 30; // 0.3%
 
     event PriceSet(address token, uint256 price, uint256 timestamp);
     event PriceDurationSet(uint256 priceDuration);
     event MaxPriceDiffSet(address token, uint256 maxPriceDiff);
     event KeeperSet(address keeper, bool isActive);
     event DeltaAndDecaySet(uint256 delta, uint256 decay);
+    event IsSpreadEnabledSet(bool isSpreadEnabled);
+    event SpreadSet(uint256 spread);
     event IsChainlinkOnlySet(bool isChainlinkOnlySet);
     event IsPikaOracleOnlySet(bool isPikaOracleOnlySet);
     event SetOwner(address owner);
@@ -37,18 +41,31 @@ contract PikaPriceFeed is Governable {
         keepers[msg.sender] = true;
     }
 
+    function getPrice(address token, bool isMax) external view returns (uint256) {
+        (uint256 price, bool isChainlink) = getPriceAndSource(token);
+        if (isSpreadEnabled || isChainlink) {
+            return isMax ? price * (PRICE_BASE + spread) / PRICE_BASE : price * (PRICE_BASE - spread) / PRICE_BASE;
+        }
+        return price;
+    }
+
     function getPrice(address token) public view returns (uint256) {
+        (uint256 price,) = getPriceAndSource(token);
+        return price;
+    }
+
+    function getPriceAndSource(address token) public view returns (uint256, bool) {
         (uint256 chainlinkPrice, uint256 chainlinkTimestamp) = getChainlinkPrice(token);
         if (isChainlinkOnly || (!isPikaOracleOnly && (block.timestamp > lastUpdatedTime.add(priceDuration) && chainlinkTimestamp > lastUpdatedTime))) {
-            return chainlinkPrice;
+            return (chainlinkPrice, true);
         }
         uint256 pikaPrice = priceMap[token];
         uint256 priceDiff = pikaPrice > chainlinkPrice ? (pikaPrice.sub(chainlinkPrice)).mul(1e18).div(chainlinkPrice) :
             (chainlinkPrice.sub(pikaPrice)).mul(1e18).div(chainlinkPrice);
         if (priceDiff > maxPriceDiff[token]) {
-            return chainlinkPrice;
+            return (chainlinkPrice, true);
         }
-        return pikaPrice;
+        return (pikaPrice, false);
     }
 
     function getChainlinkPrice(address token) public view returns (uint256 priceToReturn, uint256 chainlinkTimestamp) {
@@ -137,6 +154,16 @@ contract PikaPriceFeed is Governable {
         delta = _delta;
         decay = _decay;
         emit DeltaAndDecaySet(delta, decay);
+    }
+
+    function setIsSpreadEnabled(bool _isSpreadEnabled) external onlyOwner {
+        isSpreadEnabled = _isSpreadEnabled;
+        emit IsSpreadEnabledSet(_isSpreadEnabled);
+    }
+
+    function setSpread(uint256 _spread) external onlyOwner {
+        spread = _spread;
+        emit SpreadSet(_spread);
     }
 
     function setOwner(address _owner) external onlyGov {

@@ -54,6 +54,7 @@ contract PositionManager is Governable, ReentrancyGuard {
     uint256 public maxTimeDelay;
 
     bool public isUserSettleEnabled = true;
+    bool public allowPublicKeeper = false;
 
     bytes32[] public openPositionRequestKeys;
     bytes32[] public closePositionRequestKeys;
@@ -150,6 +151,7 @@ contract PositionManager is Governable, ReentrancyGuard {
     event SetIsUserSettleEnabled(bool isUserSettleEnabled);
     event SetDelayValues(uint256 minBlockDelayKeeper, uint256 minTimeDelayPublic, uint256 maxTimeDelay);
     event SetRequestKeysStartValues(uint256 increasePositionRequestKeysStart, uint256 decreasePositionRequestKeysStart);
+    event SetAllowPublicKeeper(bool allowPublicKeeper);
     event SetAdmin(address admin);
 
     modifier onlyPositionKeeper() {
@@ -216,12 +218,28 @@ contract PositionManager is Governable, ReentrancyGuard {
         emit SetRequestKeysStartValues(_increasePositionRequestKeysStart, _decreasePositionRequestKeysStart);
     }
 
+    function setAllowPublicKeeper(bool _allowPublicKeeper) external onlyAdmin {
+        allowPublicKeeper = _allowPublicKeeper;
+        emit SetAllowPublicKeeper(_allowPublicKeeper);
+    }
+
     function setAdmin(address _admin) external onlyGov {
         admin = _admin;
         emit SetAdmin(_admin);
     }
 
-    function executePositions(uint256 _openEndIndex, uint256 _closeEndIndex, address payable _executionFeeReceiver) external {
+    function setPricesAndExecutePositions(
+        address[] memory tokens,
+        uint256[] memory prices,
+        uint256 _openEndIndex,
+        uint256 _closeEndIndex,
+        address payable _executionFeeReceiver
+    ) external onlyPositionKeeper {
+        IOracle(oracle).setPrices(tokens, prices);
+        executePositions(_openEndIndex, _closeEndIndex, _executionFeeReceiver);
+    }
+
+    function executePositions(uint256 _openEndIndex, uint256 _closeEndIndex, address payable _executionFeeReceiver) public {
         executeOpenPositions(_openEndIndex, _executionFeeReceiver);
         executeClosePositions(_closeEndIndex, _executionFeeReceiver);
     }
@@ -376,11 +394,11 @@ contract PositionManager is Governable, ReentrancyGuard {
 
         uint256 margin = request.margin * BASE / (BASE + getTradeFeeRate(request.productId, request.margin, request.leverage, request.account) * request.leverage / 10**4);
         if (IERC20(collateralToken).isETH()) {
-            IPikaPerp(pikaPerp).openPosition{value: request.margin * tokenBase / BASE }(request.account, request.productId, margin, request.isLong, request.leverage, request.blockTime);
+            IPikaPerp(pikaPerp).openPosition{value: request.margin * tokenBase / BASE }(request.account, request.productId, margin, request.isLong, request.leverage);
         } else {
             IERC20(collateralToken).safeApprove(pikaPerp, 0);
             IERC20(collateralToken).safeApprove(pikaPerp, request.margin * tokenBase / BASE);
-            IPikaPerp(pikaPerp).openPosition(request.account, request.productId, margin, request.isLong, request.leverage, request.blockTime);
+            IPikaPerp(pikaPerp).openPosition(request.account, request.productId, margin, request.isLong, request.leverage);
         }
 
         _executionFeeReceiver.sendValue(request.executionFee * 1e18 / BASE);
@@ -442,7 +460,7 @@ contract PositionManager is Governable, ReentrancyGuard {
 
         delete closePositionRequests[_key];
 
-        IPikaPerp(pikaPerp).closePosition(request.account, request.productId, request.margin , request.isLong, request.blockTime);
+        IPikaPerp(pikaPerp).closePosition(request.account, request.productId, request.margin , request.isLong);
 
         _executionFeeReceiver.sendValue(request.executionFee * 1e18 / BASE);
 
@@ -521,7 +539,7 @@ contract PositionManager is Governable, ReentrancyGuard {
 
         if (isKeeperCall) {
             (address productToken,,,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
-            uint256 price = IOracle(oracle).getPrice(productToken);
+            uint256 price = _isLong ? IOracle(oracle).getPrice(productToken, true) : IOracle(oracle).getPrice(productToken, false);
             if (_isLong) {
                 require(price <= _acceptablePrice, "PositionManager: current price too low");
             } else {
@@ -530,7 +548,7 @@ contract PositionManager is Governable, ReentrancyGuard {
             return _positionBlockNumber.add(minBlockDelayKeeper) <= block.number;
         }
 
-        require(msg.sender == _account, "PositionManager: forbidden");
+        require(msg.sender == _account || allowPublicKeeper, "PositionManager: forbidden");
 
         require(_positionBlockTime.add(minTimeDelayPublic) <= block.timestamp, "PositionManager: min delay not yet passed for execution");
 
