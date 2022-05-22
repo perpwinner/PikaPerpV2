@@ -8,11 +8,11 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "../perp/IPikaPerp.sol";
-
+import "../access/Governable.sol";
 
 // PikaPerpV2 vault LPs can claim Pika token reward via this contract
 // adapted from https://github.com/Synthetixio/synthetix/edit/develop/contracts/StakingRewards.sol
-contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
+contract VaultTokenReward is Governable, ReentrancyGuard, Pausable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -26,12 +26,16 @@ contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
     address public rewardsDistribution;
+    address public owner;
     address public pikaPerp;
 
     mapping(address => uint256) public userRewardPerTokenPaid;
     mapping(address => uint256) public rewards;
 
     mapping(address => uint256) private _balances;
+
+    event SetOwner(address owner);
+    event SetPikaPerp(address pikaPerp);
 
     /* ========== CONSTRUCTOR ========== */
 
@@ -43,6 +47,7 @@ contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
         rewardsDistribution = _rewardsDistribution;
         rewardsToken = IERC20(_rewardsToken);
         pikaPerp = _pikaPerp;
+        owner = msg.sender;
     }
 
     /* ========== VIEWS ========== */
@@ -113,7 +118,7 @@ contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
     // Added to support recovering LP Rewards from other systems such as BAL to be distributed to holders
     function recoverERC20(address tokenAddress, uint256 tokenAmount) external onlyOwner {
         require(tokenAddress != address(stakingToken), "Cannot withdraw the staking token");
-        IERC20(tokenAddress).safeTransfer(owner(), tokenAmount);
+        IERC20(tokenAddress).safeTransfer(owner, tokenAmount);
         emit Recovered(tokenAddress, tokenAmount);
     }
 
@@ -126,8 +131,14 @@ contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
         emit RewardsDurationUpdated(rewardsDuration);
     }
 
+    function setOwner(address _owner) external onlyGov {
+        owner = _owner;
+        emit SetOwner(_owner);
+    }
+
     function setPikaPerp(address _pikaPerp) external onlyOwner {
         pikaPerp = _pikaPerp;
+        emit SetPikaPerp(_pikaPerp);
     }
 
     function updateReward(address account) public {
@@ -143,6 +154,11 @@ contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
 
     modifier onlyRewardsDistribution() {
         require(msg.sender == rewardsDistribution, "Caller is not RewardsDistribution contract");
+        _;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "!owner");
         _;
     }
 

@@ -4,10 +4,12 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV2V3Interface.sol";
+import "../access/Governable.sol";
 
-contract PikaPriceFeed is Ownable {
+contract PikaPriceFeed is Governable {
     using SafeMath for uint256;
 
+    address owner;
     uint256 public lastUpdatedTime;
     uint256 public priceDuration = 300; // 5mins
     mapping (address => uint256) public priceMap;
@@ -25,11 +27,13 @@ contract PikaPriceFeed is Ownable {
     event DeltaAndDecaySet(uint256 delta, uint256 decay);
     event IsChainlinkOnlySet(bool isChainlinkOnlySet);
     event IsPikaOracleOnlySet(bool isPikaOracleOnlySet);
+    event SetOwner(address owner);
 
     uint256 public constant MAX_PRICE_DURATION = 30 minutes;
     uint256 public constant PRICE_BASE = 10000;
 
     constructor() {
+        owner = msg.sender;
         keepers[msg.sender] = true;
     }
 
@@ -135,8 +139,18 @@ contract PikaPriceFeed is Ownable {
         emit DeltaAndDecaySet(delta, decay);
     }
 
+    function setOwner(address _owner) external onlyGov {
+        owner = _owner;
+        emit SetOwner(_owner);
+    }
+
     modifier onlyKeeper() {
         require(keepers[msg.sender], "!keepers");
+        _;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "!owner");
         _;
     }
 }

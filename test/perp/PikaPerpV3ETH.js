@@ -138,7 +138,7 @@ describe("Trading ETH", () => {
 		// add products
 		await trading.addProduct(1, p);
 		// set maxMargin
-		await trading.setMargin(1000000, 10000000000000);
+		await trading.setMinMargin("1000000");
 
 
 	});
@@ -149,7 +149,7 @@ describe("Trading ETH", () => {
 
 
 	it("Should fail setting owner from other address", async () => {
-		await expect(trading.connect(addrs[1]).setOwner(addrs[1].address)).to.be.revertedWith('!owner');
+		await expect(trading.connect(addrs[1]).setOwner(addrs[1].address)).to.be.revertedWith('!gov');
 	});
 
 

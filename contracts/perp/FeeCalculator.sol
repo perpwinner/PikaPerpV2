@@ -5,8 +5,9 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "../oracle/IOracle.sol";
+import "../access/Governable.sol";
 
-contract FeeCalculator is Ownable {
+contract FeeCalculator is Governable {
 
     uint256 public constant PRICE_BASE = 10000;
     uint256 public threshold;
@@ -14,6 +15,7 @@ contract FeeCalculator is Ownable {
     uint256 public baseFee = 10;
     uint256 public n = 1;
     uint256 public maxDynamicFee = 50; // 0.5%
+    address public owner;
     address public oracle;
     bool public isDynamicFee = true;
     bool public isDiscountEnabled = false;
@@ -32,11 +34,13 @@ contract FeeCalculator is Ownable {
     event SetMaxDynamicFee(uint256 maxDynamicFee);
     event SetDiscountForAccount(address account, uint256 discount);
     event SetDiscountForSender(address sender, uint256 discount);
+    event SetOwner(address owner);
 
     constructor(uint256 _threshold, uint256 _weightDecay, address _oracle) public {
         threshold = _threshold;
         weightDecay = _weightDecay;
         oracle = _oracle;
+        owner = msg.sender;
     }
 
     /**
@@ -132,4 +136,13 @@ contract FeeCalculator is Ownable {
         emit SetDiscountForSender(_sender, _discount);
     }
 
+    function setOwner(address _owner) external onlyGov {
+        owner = _owner;
+        emit SetOwner(_owner);
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "!owner");
+        _;
+    }
 }

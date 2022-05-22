@@ -5,12 +5,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import '../staking/PikaMine.sol';
+import "../access/Governable.sol";
 
 /** @title VePikaTokenReward
     @notice Contract to distribute token rewards for vePIKA holders. Adapted from: https://github.com/ribbon-finance/governance/blob/main/contracts/rbn-staking/VeRBNRewards.sol
  */
 
-contract VePikaTokenReward {
+contract VePikaTokenReward is Governable {
     using SafeERC20 for IERC20;
 
     IERC20 public rewardToken; // immutable are breaking coverage software should be added back after.
@@ -23,14 +24,14 @@ contract VePikaTokenReward {
     uint256 public rewardPerTokenStored;
     uint256 public currentRewards = 0;
     uint256 public historicalRewards = 0;
-    address public gov;
+    address public admin;
     mapping(address => uint256) public userRewardPerTokenPaid;
     mapping(address => uint256) public rewards;
 
     event RewardDurationUpdated(uint256 newDuration);
     event RewardAdded(uint256 reward);
     event RewardPaid(address indexed user, uint256 reward);
-    event UpdatedGov(address gov);
+    event UpdatedAdmin(address admin);
 
     constructor(
         address veToken_,
@@ -40,7 +41,7 @@ contract VePikaTokenReward {
         veToken = IERC20(veToken_);
         rewardToken = IERC20(rewardToken_);
         pikaMine = PikaMine(pikaMine_);
-        gov = msg.sender;
+        admin = msg.sender;
     }
 
     modifier _updateReward(address account) {
@@ -159,30 +160,21 @@ contract VePikaTokenReward {
     }
 
     function setDuration(uint256 _duration) external {
-        require(msg.sender == gov, "!authorized");
+        require(msg.sender == admin, "!authorized");
         require(block.timestamp >= periodFinish, "Not finished yet");
         duration = _duration;
         emit RewardDurationUpdated(_duration);
     }
 
-    /**
-     * @notice
-     * set gov
-     * @dev Can be called by gov
-     * @param _gov new gov
-     * @return true
-     */
-    function setGov(address _gov) external returns (bool) {
-        require(msg.sender == gov, "!authorized");
-
-        require(_gov != address(0), "0 address");
-        gov = _gov;
-        emit UpdatedGov(_gov);
+    function setAdmin(address _admin) external onlyGov returns (bool) {
+        require(_admin != address(0), "0 address");
+        admin = _admin;
+        emit UpdatedAdmin(_admin);
         return true;
     }
 
     function sweep(address _token) external returns (bool) {
-        require(msg.sender == gov, "!authorized");
+        require(msg.sender == admin, "!authorized");
         require(
             _token != address(rewardToken) || pikaMine.isUnlocked(),
             "!rewardToken"
@@ -190,7 +182,7 @@ contract VePikaTokenReward {
 
         SafeERC20.safeTransfer(
             IERC20(_token),
-            gov,
+            admin,
             IERC20(_token).balanceOf(address(this))
         );
         return true;

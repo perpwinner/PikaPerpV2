@@ -7,11 +7,12 @@ import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../perp/IPikaPerp.sol";
+import "../access/Governable.sol";
 
 /** @title VePikaFeeReward
     @notice Contract to distribute trading fee reward to vePIKA holders.
  */
-contract VePikaFeeReward is ReentrancyGuard, Pausable {
+contract VePikaFeeReward is Governable, ReentrancyGuard, Pausable {
 
     using SafeERC20 for IERC20;
     using Address for address payable;
@@ -27,6 +28,8 @@ contract VePikaFeeReward is ReentrancyGuard, Pausable {
     mapping(address => uint256) private previousRewardPerToken;
 
     uint256 public constant PRECISION = 10**18;
+    event SetOwner(address owner);
+    event SetPikaPerp(address pikaPerp);
     event ClaimedReward(
         address user,
         address rewardToken,
@@ -51,12 +54,14 @@ contract VePikaFeeReward is ReentrancyGuard, Pausable {
 
     // Governance methods
 
-    function setOwner(address _owner) external onlyOwner {
+    function setOwner(address _owner) external onlyGov {
         owner = _owner;
+        emit SetOwner(_owner);
     }
 
     function setPikaPerp(address _pikaPerp) external onlyOwner {
         pikaPerp = _pikaPerp;
+        emit SetPikaPerp(_pikaPerp);
     }
 
     // Methods

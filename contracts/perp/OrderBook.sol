@@ -11,8 +11,9 @@ import "../oracle/IOracle.sol";
 import '../lib/UniERC20.sol';
 import "./IPikaPerp.sol";
 import "./PikaPerpV3.sol";
+import "../access/Governable.sol";
 
-contract OrderBook is ReentrancyGuard {
+contract OrderBook is Governable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
     using UniERC20 for IERC20;
@@ -47,14 +48,13 @@ contract OrderBook is ReentrancyGuard {
 
     address public admin;
     address public pikaPerp;
-    address public vault;
     address public oracle;
+    address public feeCalculator;
     address public collateralToken;
     uint256 public tokenBase;
     uint256 public minExecutionFee;
     uint256 public minMargin;
     uint256 public maxMargin;
-    address public feeCalculator;
     uint256 public constant BASE = 1e8;
 
     event CreateOpenOrder(
@@ -149,7 +149,6 @@ contract OrderBook is ReentrancyGuard {
         bool triggerAboveThreshold,
         uint256 orderTimestamp
     );
-
     event UpdateMargin(uint256 minMargin, uint256 maxMargin);
     event UpdateMinExecutionFee(uint256 minExecutionFee);
     event UpdateTradeFee(uint256 tradeFee);
@@ -181,6 +180,14 @@ contract OrderBook is ReentrancyGuard {
         feeCalculator = _feeCalculator;
     }
 
+    function setOracle(address _oracle) external onlyAdmin {
+        oracle = _oracle;
+    }
+
+    function setFeeCalculator(address _feeCalculator) external onlyAdmin {
+        feeCalculator = _feeCalculator;
+    }
+
     function setMinExecutionFee(uint256 _minExecutionFee) external onlyAdmin {
         minExecutionFee = _minExecutionFee;
         emit UpdateMinExecutionFee(_minExecutionFee);
@@ -192,11 +199,7 @@ contract OrderBook is ReentrancyGuard {
         emit UpdateMargin(_minMargin, _maxMargin);
     }
 
-    function setFeeCalculator(address _feeCalculator) external onlyAdmin {
-        feeCalculator = _feeCalculator;
-    }
-
-    function setAdmin(address _admin) external onlyAdmin {
+    function setAdmin(address _admin) external onlyGov {
         admin = _admin;
         emit UpdateAdmin(_admin);
     }
@@ -210,10 +213,12 @@ contract OrderBook is ReentrancyGuard {
     ) external nonReentrant {
         require(_openAddresses.length == _openOrderIndexes.length && _closeAddresses.length == _closeOrderIndexes.length, "not same length");
         for (uint256 i = 0; i < _openAddresses.length; i++) {
-            executeOpenOrder(_openAddresses[i], _openOrderIndexes[i], _feeReceiver);
+            try this.executeOpenOrder(_openAddresses[i], _openOrderIndexes[i], _feeReceiver) {
+            } catch {}
         }
         for (uint256 i = 0; i < _closeAddresses.length; i++) {
-            executeCloseOrder(_closeAddresses[i], _closeOrderIndexes[i], _feeReceiver);
+            try this.executeCloseOrder(_closeAddresses[i], _closeOrderIndexes[i], _feeReceiver) {
+            } catch {}
         }
     }
 
@@ -295,13 +300,12 @@ contract OrderBook is ReentrancyGuard {
         uint256 _executionFee
     ) external payable nonReentrant {
         require(_executionFee >= minExecutionFee, "OrderBook: insufficient execution fee");
-        (,uint256 maxLeverage,,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
-        require(_leverage <= maxLeverage, "leverage too high");
+
         if (IERC20(collateralToken).isETH()) {
-            IERC20(collateralToken).uniTransferFromSenderToThis((_executionFee + _margin * _leverage / BASE) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransferFromSenderToThis((_executionFee + _margin) * tokenBase / BASE);
         } else {
             require(msg.value == _executionFee * 1e18 / BASE, "OrderBook: incorrect execution fee transferred");
-            IERC20(collateralToken).uniTransferFromSenderToThis((_margin * _leverage / BASE) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransferFromSenderToThis(_margin * tokenBase / BASE);
         }
 
         _createOpenOrder(
@@ -362,8 +366,7 @@ contract OrderBook is ReentrancyGuard {
     ) external nonReentrant {
         OpenOrder storage order = openOrders[msg.sender][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
-        (,uint256 maxLeverage,,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(order.productId);
-        require(_leverage <= maxLeverage, "leverage too high");
+
         order.leverage = _leverage;
         order.triggerPrice = _triggerPrice;
         order.triggerAboveThreshold = _triggerAboveThreshold;
@@ -389,9 +392,9 @@ contract OrderBook is ReentrancyGuard {
         delete openOrders[msg.sender][_orderIndex];
 
         if (IERC20(collateralToken).isETH()) {
-            IERC20(collateralToken).uniTransfer(msg.sender, (order.executionFee + order.margin * order.leverage / BASE) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransfer(msg.sender, (order.executionFee + order.margin) * tokenBase / BASE);
         } else {
-            IERC20(collateralToken).uniTransfer(msg.sender, (order.margin * order.leverage / BASE) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransfer(msg.sender, order.margin * tokenBase / BASE);
             payable(msg.sender).sendValue(order.executionFee * 1e18 / BASE);
         }
 

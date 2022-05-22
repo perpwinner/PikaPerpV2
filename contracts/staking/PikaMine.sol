@@ -49,6 +49,7 @@ contract PikaMine is Initializable {
     uint256 public pikaTotalDeposits;
 
     address public owner;
+    address public gov;
     // these can be pools for usdc vault fee reward, eth vault fee reward and token reward
     address[] public rewardPools;
 
@@ -61,9 +62,12 @@ contract PikaMine is Initializable {
 
     event Deposit(address indexed user, uint256 indexed index, uint256 amount, uint256 lpAmount, Lock lock);
     event Withdraw(address indexed user, uint256 indexed index, uint256 amount, uint256 lpAmount);
+    event SetOwner(address admin);
+    event SetGov(address gov);
 
     function initialize(address _pika) external initializer {
         owner = msg.sender;
+        gov = msg.sender;
         pika = IERC20Upgradeable(_pika);
     }
 
@@ -162,16 +166,18 @@ contract PikaMine is Initializable {
         }
     }
 
-    function setPikaToken(address _pika) external onlyOwner {
-        pika = IERC20Upgradeable(_pika);
-    }
-
     function setRewardPools(address[] memory _rewardPools) external onlyOwner {
         rewardPools = _rewardPools;
     }
 
-    function setOwner(address _owner) external onlyOwner {
+    function setOwner(address _owner) external onlyGov {
         owner = _owner;
+        emit SetOwner(_owner);
+    }
+
+    function setGov(address _gov) external onlyGov {
+        gov = _gov;
+        emit SetGov(_gov);
     }
 
     /// @notice EMERGENCY ONLY
@@ -227,6 +233,11 @@ contract PikaMine is Initializable {
         for (uint256 i = 0; i < rewardPools.length; i++) {
             IVaultReward(rewardPools[i]).updateReward(msg.sender);
         }
+        _;
+    }
+
+    modifier onlyGov() {
+        require(msg.sender == gov, "!gov");
         _;
     }
 

@@ -7,12 +7,13 @@ import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../perp/IPikaPerp.sol";
+import "../access/Governable.sol";
 
 /** @title VePika
     @notice PikaPerp vault LPs can claim part of platform fee via this contract
     adapted from https://github.com/Synthetixio/synthetix/edit/develop/contracts/StakingRewards.sol
  */
-contract VaultFeeReward is ReentrancyGuard, Pausable {
+contract VaultFeeReward is Governable, ReentrancyGuard, Pausable {
 
     using SafeERC20 for IERC20;
     using Address for address payable;
@@ -31,6 +32,8 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
     uint256 public constant PRECISION = 10**18;
     uint256 public constant BASE = 10**8;
 
+    event SetOwner(address owner);
+    event SetPikaPerp(address pikaPerp);
     event ClaimedReward(
         address user,
         address rewardToken,
@@ -53,12 +56,14 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
 
     // Governance methods
 
-    function setOwner(address _owner) external onlyOwner {
+    function setOwner(address _owner) external onlyGov {
         owner = _owner;
+        emit SetOwner(_owner);
     }
 
     function setPikaPerp(address _pikaPerp) external onlyOwner {
         pikaPerp = _pikaPerp;
+        emit SetPikaPerp(_pikaPerp);
     }
 
     // Methods

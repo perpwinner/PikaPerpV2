@@ -56,6 +56,13 @@ function getPositionId(account, productId, isLong) {
 	);
 }
 
+function getPositionKey(account, index) {
+	return web3.utils.soliditySha3(
+		{t: 'address', v: account},
+		{t: 'uint256', v: index}
+	);
+}
+
 // Assert that actual is less than 1/accuracy difference from expected
 function assertAlmostEqual(actual, expected, accuracy = 10000000) {
 	const expectedBN = BigNumber.isBigNumber(expected) ? expected : BigNumber.from(expected)
@@ -74,7 +81,7 @@ function assertAlmostEqual(actual, expected, accuracy = 10000000) {
 
 describe("Trading", () => {
 
-	let trading, addrs = [], owner, oracle, usdc, pika, vePikaFeeReward, vaultFeeReward, vaultTokenReward, rewardToken, orderbook, feeCalculator;
+	let trading, addrs = [], owner, oracle, usdc, pika, vePikaFeeReward, vaultFeeReward, vaultTokenReward, rewardToken, orderbook, feeCalculator, positionManager;
 
 	before(async () => {
 
@@ -125,6 +132,9 @@ describe("Trading", () => {
 		orderbook = await orderbookContract.deploy(trading.address, oracle.address, usdc.address, "1000000",
 			"100000", "5000000000", "10000000000000", feeCalculator.address);
 
+		const positionManagerContract = await ethers.getContractFactory("PositionManager");
+		positionManager = await positionManagerContract.deploy(trading.address, feeCalculator.address, oracle.address, usdc.address, "100000", "1000000");
+
 		let v = [
 			100000000000000, //1m usdc cap
 			0,
@@ -153,7 +163,7 @@ describe("Trading", () => {
 		// add products
 		await trading.addProduct(1, p);
 		// set maxMargin
-		await trading.setMargin("10000000000", "10000000000000");
+		await trading.setMinMargin("10000000000");
 	});
 
 	it("Owner should be set", async () => {
@@ -161,7 +171,7 @@ describe("Trading", () => {
 	});
 
 	it("Should fail setting owner from other address", async () => {
-		await expect(trading.connect(addrs[1]).setOwner(addrs[1].address)).to.be.revertedWith('!owner');
+		await expect(trading.connect(addrs[1]).setOwner(addrs[1].address)).to.be.revertedWith('!gov');
 	});
 
 	// it("Owner should setMargin", async () => {
@@ -524,7 +534,7 @@ describe("Trading", () => {
 			await usdc.mint(account2.address, 1000000000000);
 
 			const amount = "100000000000";
-			const leverage = "100000000";
+			const leverage = "200000000";
 			const size = amount;
 			const executionFee = "1000000000000000";
 			await oracle.setPrice(3001e8);
@@ -575,6 +585,310 @@ describe("Trading", () => {
 			await orderbook.connect(account2).executeCloseOrder(account1.address, 1, account2.address);
 			const position2 = await trading.getPosition(account1.address, 1, true);
 			expect(position2[4]).to.equal("0");
+		})
+
+		it(`positionManager`, async () => {
+			const account1 = addrs[7]
+			const account2 = addrs[8]
+			const keeper = addrs[9]
+			await usdc.mint(account1.address, 1000000000000);
+			await usdc.mint(account2.address, 1000000000000);
+
+			const amount = "100000000000";
+			const leverage = "200000000";
+			const size = amount;
+			const executionFee = "1000000000000000";
+			await oracle.setPrice(3001e8);
+			await trading.connect(owner).setManager(positionManager.address, true);
+			await trading.connect(account1).setAccountManager(positionManager.address, true);
+			await trading.connect(account2).setAccountManager(positionManager.address, true);
+			await positionManager.connect(owner).setPositionKeeper(keeper.address, true);
+			await positionManager.connect(owner).setDelayValues(3, 30, 300);
+			// let ethAmount = (BigNumber.from(amount).mul(BigNumber.from("10010000000")));
+			await usdc.connect(account1).approve(positionManager.address, "10000000000000000000000")
+			await usdc.connect(account2).approve(positionManager.address, "10000000000000000000000")
+
+			// 1. cancel open order with user account
+			await positionManager.connect(account1).createOpenPosition(1, amount, leverage,  true, "300000000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			const openPositionRequest1 = (await positionManager.getOpenPositionRequest(account1.address, 1));
+			expect(openPositionRequest1.margin.toString()).to.be.equal(amount);
+			await expect(positionManager.connect(account2).cancelOpenPosition(getPositionKey(account1.address, 1), owner.address)).to.be.revertedWith("PositionManager: forbidden");
+			await expect(positionManager.connect(account1).cancelOpenPosition(getPositionKey(account1.address, 1), owner.address)).to.be.revertedWith("PositionManager: min delay not yet passed for cancellation");
+			await provider.send("evm_increaseTime", [30])
+			await provider.send("evm_mine")
+			const account1Balance = await usdc.balanceOf(account1.address)
+			await positionManager.connect(account1).cancelOpenPosition(getPositionKey(account1.address, 1), account1.address)
+			const openPositionRequest2 = (await positionManager.getOpenPositionRequest(account1.address, 1));
+			expect(openPositionRequest2.margin.toString()).to.be.equal("0");
+			expect(await provider.getBalance(positionManager.address)).to.be.equal("0")
+			expect((await usdc.balanceOf(account1.address)).sub(account1Balance).mul("100")).to.be.equal(amount)
+
+			// 2. cancel open position with keeper account
+			await positionManager.connect(account1).createOpenPosition(1, amount, leverage,  true, "300000000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(keeper).cancelOpenPosition(getPositionKey(account1.address, 2), owner.address)
+			// should not cancel because of block time
+			const openPositionRequest3 = (await positionManager.getOpenPositionRequest(account1.address, 2));
+			expect(openPositionRequest3.margin.toString()).to.be.equal(amount);
+			// should cancel after some blocks
+			await provider.send("evm_increaseTime", [10]);
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			const account1Balance1 = await usdc.balanceOf(account1.address)
+			await positionManager.connect(keeper).cancelOpenPosition(getPositionKey(account1.address, 2), account1.address)
+			const openPositionRequest4 = (await positionManager.getOpenPositionRequest(account1.address, 2));
+			expect(openPositionRequest4.margin.toString()).to.be.equal("0");
+			expect(await provider.getBalance(positionManager.address)).to.be.equal("0")
+			expect((await usdc.balanceOf(account1.address)).sub(account1Balance1).mul("100")).to.be.equal(amount)
+
+			// 3. cancel close position with user account
+			await positionManager.connect(account1).createClosePosition(1, amount,  true, "300000000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			const closePositionRequest1 = (await positionManager.getClosePositionRequest(account1.address, 1));
+			expect(closePositionRequest1.margin.toString()).to.be.equal(amount);
+			await expect(positionManager.connect(account2).cancelClosePosition(getPositionKey(account1.address, 1), owner.address)).to.be.revertedWith("PositionManager: forbidden");
+			await expect(positionManager.connect(account1).cancelClosePosition(getPositionKey(account1.address, 1), owner.address)).to.be.revertedWith("PositionManager: min delay not yet passed for cancellation");
+			await provider.send("evm_increaseTime", [30])
+			await provider.send("evm_mine")
+			await positionManager.connect(account1).cancelClosePosition(getPositionKey(account1.address, 1), account1.address)
+			const closePositionRequest2 = (await positionManager.getClosePositionRequest(account1.address, 1));
+			expect(closePositionRequest2.margin.toString()).to.be.equal("0");
+			expect(await provider.getBalance(positionManager.address)).to.be.equal("0")
+
+			// 4. cancel close position with keeper account
+			await positionManager.connect(account1).createClosePosition(1, amount,  true, "300000000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(keeper).cancelClosePosition(getPositionKey(account1.address, 2), owner.address)
+			// should not cancel because of block time
+			const closePositionRequest3 = (await positionManager.getClosePositionRequest(account1.address, 2));
+			expect(closePositionRequest3.margin.toString()).to.be.equal(amount);
+			// should cancel after some blocks
+			await provider.send("evm_increaseTime", [10]);
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await positionManager.connect(keeper).cancelClosePosition(getPositionKey(account1.address, 2), account1.address)
+			const closePositionRequest4 = (await positionManager.getClosePositionRequest(account1.address, 2));
+			expect(closePositionRequest4.margin.toString()).to.be.equal("0");
+			expect(await provider.getBalance(positionManager.address)).to.be.equal("0")
+
+			// 5. execute open position with user account
+			await positionManager.connect(account1).createOpenPosition(1, amount, leverage,  true, "300000000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+
+			await expect(positionManager.connect(account2).executeOpenPosition(getPositionKey(account1.address, 3), account2.address)).to.be.revertedWith('PositionManager: forbidden');
+			await expect(positionManager.connect(account1).executeOpenPosition(getPositionKey(account1.address, 3), account1.address)).to.be.revertedWith('PositionManager: min delay not yet passed for execution');
+
+			await provider.send("evm_increaseTime", [30])
+			await provider.send("evm_mine")
+
+			await positionManager.connect(account1).executeOpenPosition(getPositionKey(account1.address, 3), account1.address)
+
+			const position1 = await trading.getPosition(account1.address, 1, true);
+			expect(position1[0]).to.equal(productId);
+			expect(position1[5]).to.equal(account1.address);
+			expect(position1[8]).to.equal(true);
+			expect(position1[1]).to.equal("200000000");
+			// cannot execute open position after max time
+			await positionManager.connect(account1).createOpenPosition(1, amount, leverage, true, "300000000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			await provider.send("evm_increaseTime", [301])
+			await provider.send("evm_mine")
+			await expect(positionManager.connect(account1).executeOpenPosition(getPositionKey(account1.address, 4), account1.address)).to.be.revertedWith('PositionManager: request has expired');
+			// can still execute close position after max time
+			await positionManager.connect(account1).createClosePosition(1, amount,  true, "300000000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			await provider.send("evm_increaseTime", [301])
+			await provider.send("evm_mine")
+			await positionManager.connect(account1).executeClosePosition(getPositionKey(account1.address, 3), account1.address)
+			const position2 = await trading.getPosition(account1.address, 1, true);
+			expect(position2[0]).to.equal("0");
+
+			// 6. execute open position with keeper account
+			await positionManager.connect(account1).createOpenPosition(1, amount, leverage,  true, "300000000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+
+			await expect(positionManager.connect(keeper).executeOpenPosition(getPositionKey(account1.address, 5), account2.address)).to.be.revertedWith('PositionManager: current price too low');
+
+			await positionManager.connect(account1).createOpenPosition(1, amount, leverage,  false, "300200000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			await expect(positionManager.connect(keeper).executeOpenPosition(getPositionKey(account1.address, 6), account2.address)).to.be.revertedWith('PositionManager: current price too high');
+
+			await positionManager.connect(account1).createOpenPosition(1, amount, leverage,  true, "300100000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(keeper).executeOpenPosition(getPositionKey(account1.address, 7), account1.address)
+			// should not execute because of block time
+			const position3 = await trading.getPosition(account1.address, 1, true);
+			expect(position3[0]).to.equal("0");
+			// should execute after some blocks
+			await provider.send("evm_increaseTime", [10]);
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await positionManager.connect(keeper).executeOpenPosition(getPositionKey(account1.address, 7), account1.address)
+			const position4 = await trading.getPosition(account1.address, 1, true);
+			expect(position4[0]).to.equal("1");
+			expect(position4[1]).to.equal("200000000");
+
+			// 7. execute close position with user account
+			await positionManager.connect(account1).createClosePosition(1, amount,  true, "300000000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+
+			await expect(positionManager.connect(account2).executeClosePosition(getPositionKey(account1.address, 4), account2.address)).to.be.revertedWith('PositionManager: forbidden');
+			await expect(positionManager.connect(account1).executeClosePosition(getPositionKey(account1.address, 4), account1.address)).to.be.revertedWith('PositionManager: min delay not yet passed for execution');
+
+			await provider.send("evm_increaseTime", [30])
+			await provider.send("evm_mine")
+
+			await positionManager.connect(account1).createOpenPosition(1, amount, leverage,  true, "300100000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(account1).executeOpenPosition(getPositionKey(account1.address, 7), account1.address)
+			const position5 = await trading.getPosition(account1.address, 1, true);
+			expect(position5[0]).to.equal("1");
+
+			// 8. execute close position with keeper account
+			await positionManager.connect(account1).createClosePosition(1, amount,  true, "300200000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			await expect(positionManager.connect(keeper).executeClosePosition(getPositionKey(account1.address, 5), account1.address)).to.be.revertedWith('PositionManager: current price too high');
+			// should not execute because of block time
+			await positionManager.connect(account1).createClosePosition(1, amount,  true, "300000000000", "100000", {from: account1.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(keeper).executeClosePosition(getPositionKey(account1.address, 6), account1.address)
+			const position6 = await trading.getPosition(account1.address, 1, true);
+			expect(position6[0]).to.equal("1");
+			// should execute after some blocks
+			await provider.send("evm_increaseTime", [10]);
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await positionManager.connect(keeper).executeClosePosition(getPositionKey(account1.address, 6), account1.address)
+			const position7 = await trading.getPosition(account1.address, 1, true);
+			expect(position7[0]).to.equal("0");
+
+			// 9. batch executions for long
+			await positionManager.connect(keeper).executePositions(100, 100, account1.address) // clear all previous pending requests
+			await positionManager.connect(owner).setDelayValues(5, 30, 300);
+			await positionManager.connect(account2).createOpenPosition(1, amount, leverage,  true, "300100000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(account2).createOpenPosition(1, amount, leverage,  true, "300100000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(account2).createOpenPosition(1, amount, leverage,  true, "300000000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+
+			// all are skipped because of min block delay is not reached
+			await positionManager.connect(keeper).executePositions(100, 100, account1.address)
+			const position8 = await trading.getPosition(account2.address, 1, true);
+			expect(position8[0]).to.equal("0");
+
+			// 3 are executed, 2 are cancelled and 1 is skipped
+			await positionManager.connect(account2).createClosePosition(1, amount,  true, "300100000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(account2).createClosePosition(1, amount,  true, "300200000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+			await provider.send("evm_increaseTime", [10]);
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await positionManager.connect(account2).createClosePosition(1, amount,  true, "300100000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+
+			await positionManager.connect(keeper).executePositions(100, 100, account1.address)
+			const position9 = await trading.getPosition(account2.address, 1, true);
+			expect(position9[0]).to.equal(productId);
+			expect(position9[1]).to.equal("200000000");
+			// executed the last request
+			await provider.send("evm_increaseTime", [10]);
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await positionManager.connect(keeper).executePositions(100, 100, account1.address)
+			const position10 = await trading.getPosition(account2.address, 1, true);
+			expect(position10[0]).to.equal("0");
+
+			// 9. batch executions for short
+			await positionManager.connect(keeper).executePositions(100, 100, account1.address) // clear all previous pending requests
+			await positionManager.connect(account2).createOpenPosition(1, amount, leverage, false, "300100000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(account2).createOpenPosition(1, amount, leverage, false, "300100000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(account2).createOpenPosition(1, amount, leverage, false, "300200000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+
+			// all are skipped because of min block delay is not reached
+			await positionManager.connect(keeper).executePositions(100, 100, account1.address)
+			const position11 = await trading.getPosition(account2.address, 1, false);
+			expect(position11[0]).to.equal("0");
+
+			// 3 are executed, 2 are cancelled and 1 is skipped
+			await positionManager.connect(account2).createClosePosition(1, amount,  false, "300100000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+			await positionManager.connect(account2).createClosePosition(1, amount,  false, "200900000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+			await provider.send("evm_increaseTime", [10]);
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await positionManager.connect(account2).createClosePosition(1, amount,  false, "300100000000", "100000", {from: account2.address, value:
+				executionFee, gasPrice: gasPrice})
+
+			await positionManager.connect(keeper).executePositions(100, 100, account1.address)
+			const position12 = await trading.getPosition(account2.address, 1, false);
+			expect(position12[0]).to.equal(productId);
+			expect(position12[1]).to.equal("200000000");
+			// executed the last request
+			await provider.send("evm_increaseTime", [10]);
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await provider.send("evm_mine");
+			await positionManager.connect(keeper).executePositions(100, 100, account1.address)
+			const position13 = await trading.getPosition(account2.address, 1, false);
+			expect(position13[0]).to.equal("0");
+
+			// await expect(positionManager.connect(account1).executeOpenPosition(getPositionKey(account1.address, 3), account1.address)).to.be.revertedWith('PositionManager: min delay not yet passed');
+
+			// await provider.send("evm_increaseTime", [30])
+			// await provider.send("evm_mine")
+			//
+			// await positionManager.connect(account1).executeOpenPosition(getPositionKey(account1.address, 3), account1.address)
+			//
+			// const position1 = await trading.getPosition(account1.address, 1, true);
+			// console.log(position1)
+			// expect(position1[0]).to.equal(productId);
+			// expect(position1[5]).to.equal(account1.address);
+			// expect(position1[8]).to.equal(true);
+			// expect(position1[1]).to.equal("200000000");
+			//
+			// await positionManager.connect(account1).createOpenPosition(1, amount, leverage, true, "300000000000", "100000", {from: account1.address, value:
+			// 	executionFee, gasPrice: gasPrice})
+			// await provider.send("evm_increaseTime", [301])
+			// await provider.send("evm_mine")
+			// await expect(positionManager.connect(account1).executeOpenPosition(getPositionKey(account1.address, 4), account1.address)).to.be.revertedWith('PositionManager: request has expired');
+
+			// await positionManager.connect(account1).createClosePosition(1, amount, true, "300000000000", "100000", {from: account1.address, value:
+			// 	executionFee, gasPrice: gasPrice})
+			// await provider.send("evm_increaseTime", [301])
+			// await provider.send("evm_mine")
+			// await positionManager.connect(account1).executeClosePosition(getPositionKey(account1.address, 3), account1.address)
+
+			// // create close order
+			// await orderbook.connect(account1).createCloseOrder(1, size, true, "300000000000", false, {from: account1.address, value: "1000000000000000", gasPrice: gasPrice})
+			// const closeOrder1 = (await orderbook.getCloseOrder(account1.address, 0));
+			// expect(closeOrder1.size.toString()).to.be.equal(size);
+			// // cancel close order
+			// await orderbook.connect(account1).cancelCloseOrder(0);
+			// const closeOrder2 = (await orderbook.getCloseOrder(account1.address, 0));
+			// expect(closeOrder2.size.toString()).to.be.equal("0");
+			// // create close order again
+			// await orderbook.connect(account1).createCloseOrder(1, size, true, "300000000000", false, {from: account1.address, value: "1000000000000000", gasPrice: gasPrice})
+			// await expect(orderbook.connect(account2).executeCloseOrder(account1.address, 1, account2.address)).to.be.revertedWith('OrderBook: invalid price for execution');
+			// // update close order
+			// await orderbook.connect(account1).updateCloseOrder(1, "200000000000", "300100000000", false);
+			// // execute close order
+			// await orderbook.connect(account2).executeCloseOrder(account1.address, 1, account2.address);
+			// const position2 = await trading.getPosition(account1.address, 1, true);
+			// expect(position2[4]).to.equal("0");
 		})
 	});
 });

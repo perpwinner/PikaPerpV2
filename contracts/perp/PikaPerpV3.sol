@@ -69,6 +69,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     // Variables
 
     address public owner;
+    address public gov;
     address private token;
     address public oracle;
     address public protocolRewardDistributor;
@@ -82,7 +83,6 @@ contract PikaPerpV3 is ReentrancyGuard {
     uint256 public pikaRewardRatio = 3000;  // 30%
     uint256 public maxShift = 0.003e8; // max shift (shift is used adjust the price to balance the longs and shorts)
     uint256 public minProfitTime = 6 hours; // the time window where minProfit is effective
-    uint256 private maxPositionMargin; // for guarded launch
     uint256 public totalWeight; // total exposure weights of all product
     uint256 private exposureMultiplier = 10000; // exposure multiplier
     uint256 private utilizationMultiplier = 10000; // exposure multiplier
@@ -189,6 +189,7 @@ contract PikaPerpV3 is ReentrancyGuard {
 
     constructor(address _token, uint256 _tokenBase, address _oracle, address _feeCalculator) {
         owner = msg.sender;
+        gov = msg.sender;
         token = _token;
         tokenBase = _tokenBase;
         oracle = _oracle;
@@ -198,8 +199,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     // Methods
 
     function stake(uint256 amount, address user) external payable nonReentrant {
-        require(canUserStake || msg.sender == owner, "!stake");
-        require(msg.sender == user || _validateManager(user), "!stake");
+        require((canUserStake || msg.sender == owner) && (msg.sender == user || _validateManager(user)), "!stake");
         IVaultReward(vaultRewardDistributor).updateReward(user);
         IVaultReward(vaultTokenReward).updateReward(user);
         IERC20(token).uniTransferFromSenderToThis(amount * tokenBase / BASE);
@@ -284,16 +284,16 @@ contract PikaPerpV3 is ReentrancyGuard {
         uint256 leverage,
         uint256 orderTimestamp
     ) public payable nonReentrant {
-        require(user == msg.sender || _validateManager(user), "not-allowed");
+        require(user == msg.sender || _validateManager(user), "!allowed");
         require(isTradeEnabled, "!enabled");
         // Check params
-        require(margin >= minMargin, "!margin");
-        require(leverage >= 1 * BASE, "!leverage");
+        require(margin >= minMargin && margin < type(uint64).max, "!margin");
+        require(leverage >= 1 * BASE, "!lev");
 
         // Check product
         Product storage product = products[productId];
         require(product.isActive, "!active");
-        require(leverage <= uint256(product.maxLeverage), "!max-leverage");
+        require(leverage <= uint256(product.maxLeverage), "!max-lev");
 
         // Transfer margin plus fee
         uint256 tradeFee = PerpLib._getTradeFee(margin, leverage, uint256(product.fee), product.productToken, user, msg.sender, feeCalculator);
@@ -314,7 +314,6 @@ contract PikaPerpV3 is ReentrancyGuard {
             leverage = (uint256(position.margin) * uint256(position.leverage) + margin * leverage) / (uint256(position.margin) + margin);
             margin = uint256(position.margin) + margin;
         }
-        require(margin < maxPositionMargin, "!max-margin");
 
         positions[getPositionId(user, productId, isLong)] = Position({
         owner: user,
@@ -354,12 +353,12 @@ contract PikaPerpV3 is ReentrancyGuard {
 
         // Check position
         Position storage position = positions[positionId];
-        require(msg.sender == position.owner || _validateManager(position.owner), "not-allowed");
+        require(msg.sender == position.owner || _validateManager(position.owner), "!allowed");
 
         // New position params
         uint256 newMargin = uint256(position.margin) + margin;
         uint256 newLeverage = uint256(position.leverage) * uint256(position.margin) / newMargin;
-        require(newLeverage >= 1 * BASE, "!low-leverage");
+        require(newLeverage >= 1 * BASE, "!low-lev");
 
         position.margin = uint64(newMargin);
         position.leverage = uint64(newLeverage);
@@ -469,7 +468,7 @@ contract PikaPerpV3 is ReentrancyGuard {
         } else {
             uint256 _pnlAfterFee = uint256(pnlAfterFee);
             // Check vault
-            require(uint256(vault.balance) >= _pnlAfterFee, "!vault-balance");
+            require(uint256(vault.balance) >= _pnlAfterFee, "!bal");
             vault.balance -= uint96(_pnlAfterFee);
 
             IERC20(token).uniTransfer(position.owner, (margin + _pnlAfterFee) * tokenBase / BASE);
@@ -563,10 +562,10 @@ contract PikaPerpV3 is ReentrancyGuard {
             uint256 maxExposure = uint256(vault.balance) * uint256(product.weight) * exposureMultiplier / uint256(totalWeight) / (10**4);
             if (isLong) {
                 product.openInterestLong = product.openInterestLong + uint64(amount);
-                require(uint256(product.openInterestLong) <= uint256(maxExposure) + uint256(product.openInterestShort), "!exposure");
+                require(uint256(product.openInterestLong) <= uint256(maxExposure) + uint256(product.openInterestShort), "!exposure-long");
             } else {
                 product.openInterestShort = product.openInterestShort + uint64(amount);
-                require(uint256(product.openInterestShort) <= uint256(maxExposure) + uint256(product.openInterestLong), "!exposure");
+                require(uint256(product.openInterestShort) <= uint256(maxExposure) + uint256(product.openInterestLong), "!exposure-short");
             }
         } else {
             totalOpenInterest = totalOpenInterest - amount;
@@ -592,7 +591,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     }
 
     function distributeProtocolReward() external returns(uint256) {
-        require(msg.sender == protocolRewardDistributor, "!distributor");
+        require(msg.sender == protocolRewardDistributor, "!dist");
         uint256 _pendingProtocolReward = pendingProtocolReward * tokenBase / BASE;
         if (pendingProtocolReward > 0) {
             pendingProtocolReward = 0;
@@ -603,7 +602,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     }
 
     function distributePikaReward() external returns(uint256) {
-        require(msg.sender == pikaRewardDistributor, "!distributor");
+        require(msg.sender == pikaRewardDistributor, "!dist");
         uint256 _pendingPikaReward = pendingPikaReward * tokenBase / BASE;
         if (pendingPikaReward > 0) {
             pendingPikaReward = 0;
@@ -614,7 +613,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     }
 
     function distributeVaultReward() external returns(uint256) {
-        require(msg.sender == vaultRewardDistributor, "!distributor");
+        require(msg.sender == vaultRewardDistributor, "!dist");
         uint256 _pendingVaultReward = pendingVaultReward * tokenBase / BASE;
         if (pendingVaultReward > 0) {
             pendingVaultReward = 0;
@@ -758,7 +757,7 @@ contract PikaPerpV3 is ReentrancyGuard {
 
     function updateVault(Vault memory _vault) external {
         onlyOwner();
-        require(_vault.cap > 0 && _vault.stakingPeriod > 0 && _vault.stakingPeriod < 30 days, "not-allowed");
+        require(_vault.cap > 0 && _vault.stakingPeriod > 0 && _vault.stakingPeriod < 30 days, "!allowed");
 
         vault.cap = _vault.cap;
         vault.stakingPeriod = _vault.stakingPeriod;
@@ -770,9 +769,9 @@ contract PikaPerpV3 is ReentrancyGuard {
         onlyOwner();
         require(productId > 0, "!id");
         Product memory product = products[productId];
-        require(product.maxLeverage == 0, "!exists");
+        require(product.maxLeverage == 0, "!exist");
 
-        require(_product.maxLeverage > 1 * BASE && _product.productToken != address(0) && _product.liquidationThreshold > 0, "not-allowed");
+        require(_product.maxLeverage > 1 * BASE && _product.productToken != address(0) && _product.liquidationThreshold > 0, "!allowed");
 
         products[productId] = Product({
         productToken: _product.productToken,
@@ -797,9 +796,9 @@ contract PikaPerpV3 is ReentrancyGuard {
         onlyOwner();
         require(productId > 0, "!id");
         Product storage product = products[productId];
-        require(product.maxLeverage > 0, "!exists");
+        require(product.maxLeverage > 0, "!exist");
 
-        require(_product.maxLeverage >= 1 * BASE && _product.productToken != address(0) && _product.liquidationThreshold > 0 , "!not-allowed");
+        require(_product.maxLeverage >= 1 * BASE && _product.productToken != address(0) && _product.liquidationThreshold > 0 , "!allowed");
 
         product.productToken = _product.productToken;
         product.maxLeverage = _product.maxLeverage;
@@ -846,10 +845,9 @@ contract PikaPerpV3 is ReentrancyGuard {
         pikaRewardRatio = _pikaRewardRatio;
     }
 
-    function setMargin(uint256 _minMargin, uint256 _maxPositionMargin) external {
+    function setMinMargin(uint256 _minMargin) external {
         onlyOwner();
         minMargin = _minMargin;
-        maxPositionMargin = _maxPositionMargin;
     }
 
     function setTradeEnabled(bool _isTradeEnabled) external {
@@ -894,13 +892,17 @@ contract PikaPerpV3 is ReentrancyGuard {
     }
 
     function setOwner(address _owner) external {
-        onlyOwner();
+        onlyGov();
         owner = _owner;
         emit OwnerUpdated(_owner);
     }
 
     function onlyOwner() private {
         require(msg.sender == owner, "!owner");
+    }
+
+    function onlyGov() private {
+        require(msg.sender == gov, "!gov");
     }
 
 }
