@@ -7,13 +7,14 @@ import '@openzeppelin/contracts-upgradeable/utils/math/SafeCastUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol';
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import '@openzeppelin/contracts-upgradeable/access/AccessControlEnumerableUpgradeable.sol';
+import '@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol';
 import './IVaultReward.sol';
 
 /** @title VePika
     @notice Support locking PIKA to earn trading fee and token rewards. The longer the lock, the higher the weight
     the staker. The weight is also manifested as vePIKA balance.
  */
-contract PikaMine is Initializable {
+contract PikaMine is Initializable, ReentrancyGuardUpgradeable {
     using EnumerableSetUpgradeable for EnumerableSetUpgradeable.AddressSet;
     using EnumerableSetUpgradeable for EnumerableSetUpgradeable.UintSet;
 
@@ -103,7 +104,9 @@ contract PikaMine is Initializable {
         return unlockAll;
     }
 
-    function deposit(uint256 _amount, Lock _lock) public updateRewards {
+    function deposit(uint256 _amount, Lock _lock) public updateRewards nonReentrant {
+        pika.safeTransferFrom(msg.sender, address(this), _amount);
+
         (UserInfo storage user, uint256 depositId) = _addDeposit(msg.sender);
         (uint256 lockBoost, uint256 timelock) = getLockBoost(_lock);
         uint256 lpAmount = _amount * lockBoost / ONE;
@@ -115,12 +118,10 @@ contract PikaMine is Initializable {
         user.lockedUntil = block.timestamp + timelock;
         user.lock = _lock;
 
-        pika.safeTransferFrom(msg.sender, address(this), _amount);
-
         emit Deposit(msg.sender, depositId, _amount, lpAmount, _lock);
     }
 
-    function withdraw(uint256 _amount, uint256 _depositId) public updateRewards returns (bool) {
+    function withdraw(uint256 _amount, uint256 _depositId) public updateRewards nonReentrant returns (bool) {
         UserInfo storage user = userInfo[msg.sender][_depositId];
         uint256 depositAmount = user.depositAmount;
         if (depositAmount == 0) return false;

@@ -69,6 +69,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     // Variables
 
     address public owner;
+    address public guardian;
     address public gov;
     address private token;
     address public oracle;
@@ -185,11 +186,15 @@ contract PikaPerpV3 is ReentrancyGuard {
     event OwnerUpdated(
         address newOwner
     );
+    event GuardianUpdated(
+        address newGuardian
+    );
 
     // Constructor
 
     constructor(address _token, uint256 _tokenBase, address _oracle, address _feeCalculator) {
         owner = msg.sender;
+        guardian = msg.sender;
         gov = msg.sender;
         token = _token;
         tokenBase = _tokenBase;
@@ -892,6 +897,22 @@ contract PikaPerpV3 is ReentrancyGuard {
         onlyGov();
         owner = _owner;
         emit OwnerUpdated(_owner);
+    }
+
+    function setGuardian(address _guardian) external {
+        onlyGov();
+        guardian = _guardian;
+        emit GuardianUpdated(_guardian);
+    }
+
+    function pauseTrading() external {
+        onlyGuardian();
+        isTradeEnabled = false;
+        canUserStake = false;
+    }
+
+    function onlyGuardian() private {
+        require(msg.sender == guardian, "!guardian");
     }
 
     function onlyOwner() private {

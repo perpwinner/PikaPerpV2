@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import '../staking/PikaMine.sol';
 import "../access/Governable.sol";
 
@@ -11,7 +12,7 @@ import "../access/Governable.sol";
     @notice Contract to distribute token rewards for vePIKA holders. Adapted from: https://github.com/ribbon-finance/governance/blob/main/contracts/rbn-staking/VeRBNRewards.sol
  */
 
-contract VePikaTokenReward is Governable {
+contract VePikaTokenReward is Governable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IERC20 public rewardToken; // immutable are breaking coverage software should be added back after.
@@ -88,8 +89,8 @@ contract VePikaTokenReward is Governable {
         return _earnedReward(account);
     }
 
-    /** @notice use to update rewards on veRBN balance changes.
-        @dev called by veRBN
+    /** @notice use to update rewards on vePIKA balance changes.
+        @dev called by vePIKA
      *  @return true
      */
     function updateReward(address _account)
@@ -106,7 +107,7 @@ contract VePikaTokenReward is Governable {
      * @notice
      *  Get rewards
      */
-    function getReward() external {
+    function getReward() external nonReentrant {
         _getReward(msg.sender);
     }
 
@@ -130,6 +131,7 @@ contract VePikaTokenReward is Governable {
      * @return true
      */
     function queueNewRewards(uint256 _amount) external returns (bool) {
+        require(msg.sender == admin, "!authorized");
         require(_amount != 0, "==0");
         IERC20(rewardToken).safeTransferFrom(
             msg.sender,
