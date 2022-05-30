@@ -43,10 +43,10 @@ contract PositionManager is Governable, ReentrancyGuard {
 
     address public admin;
 
-    address public pikaPerp;
+    address public immutable pikaPerp;
     address public feeCalculator;
     address public oracle;
-    address public collateralToken;
+    address public immutable collateralToken;
     uint256 public minExecutionFee;
 
     uint256 public minBlockDelayKeeper;
@@ -62,7 +62,7 @@ contract PositionManager is Governable, ReentrancyGuard {
     uint256 public openPositionRequestKeysStart;
     uint256 public closePositionRequestKeysStart;
 
-    uint256 public tokenBase;
+    uint256 public immutable tokenBase;
     uint256 public constant BASE = 1e8;
 
     mapping (address => bool) public isPositionKeeper;
@@ -429,10 +429,11 @@ contract PositionManager is Governable, ReentrancyGuard {
         delete openPositionRequests[_key];
 
         if (IERC20(collateralToken).isETH()) {
-            IERC20(collateralToken).uniTransfer(request.account, (request.executionFee + request.margin) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransfer(request.account, request.margin * tokenBase / BASE);
+            IERC20(collateralToken).uniTransfer(_executionFeeReceiver, request.executionFee * tokenBase / BASE);
         } else {
             IERC20(collateralToken).uniTransfer(request.account, request.margin * tokenBase / BASE);
-            payable(msg.sender).sendValue(request.executionFee * 1e18 / BASE);
+            payable(_executionFeeReceiver).sendValue(request.executionFee * 1e18 / BASE);
         }
 
         emit CancelIncreasePosition(

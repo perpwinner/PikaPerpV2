@@ -48,11 +48,11 @@ contract OrderBook is Governable, ReentrancyGuard {
     mapping (address => bool) public isKeeper;
 
     address public admin;
-    address public pikaPerp;
+    address public immutable pikaPerp;
     address public oracle;
     address public feeCalculator;
-    address public collateralToken;
-    uint256 public tokenBase;
+    address public immutable collateralToken;
+    uint256 public immutable tokenBase;
     uint256 public minExecutionFee;
     uint256 public minMargin;
     uint256 public maxMargin;
