@@ -24,6 +24,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         uint256 productId;
         uint256 margin;
         uint256 leverage;
+        uint256 tradeFee;
         bool isLong;
         uint256 triggerPrice;
         bool triggerAboveThreshold;
@@ -54,10 +55,10 @@ contract OrderBook is Governable, ReentrancyGuard {
     address public immutable collateralToken;
     uint256 public immutable tokenBase;
     uint256 public minExecutionFee;
-    uint256 public minMargin;
-    uint256 public maxMargin;
-    uint256 public minTimeDelay;
+    uint256 public minTimeExecuteDelay;
+    uint256 public minTimeCancelDelay;
     uint256 public constant BASE = 1e8;
+    uint256 public constant FEE_BASE = 1e4;
 
     event CreateOpenOrder(
         address indexed account,
@@ -65,6 +66,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         uint256 productId,
         uint256 margin,
         uint256 leverage,
+        uint256 tradeFee,
         bool isLong,
         uint256 triggerPrice,
         bool triggerAboveThreshold,
@@ -77,6 +79,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         uint256 productId,
         uint256 margin,
         uint256 leverage,
+        uint256 tradeFee,
         bool isLong,
         uint256 triggerPrice,
         bool triggerAboveThreshold,
@@ -89,6 +92,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         uint256 productId,
         uint256 margin,
         uint256 leverage,
+        uint256 tradeFee,
         bool isLong,
         uint256 triggerPrice,
         bool triggerAboveThreshold,
@@ -102,6 +106,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         uint256 productId,
         uint256 margin,
         uint256 leverage,
+        uint256 tradeFee,
         bool isLong,
         uint256 triggerPrice,
         bool triggerAboveThreshold,
@@ -151,8 +156,10 @@ contract OrderBook is Governable, ReentrancyGuard {
         bool triggerAboveThreshold,
         uint256 orderTimestamp
     );
-    event UpdateMargin(uint256 minMargin, uint256 maxMargin);
-    event UpdateMinTimeDelay(uint256 minDelayBlock);
+    event ExecuteOpenOrderError(address, uint256, string);
+    event ExecuteCloseOrderError(address, uint256, string);
+    event UpdateMinTimeExecuteDelay(uint256 minTimeExecuteDelay);
+    event UpdateMinTimeCancelDelay(uint256 minTimeCancelDelay);
     event UpdateMinExecutionFee(uint256 minExecutionFee);
     event UpdateTradeFee(uint256 tradeFee);
     event UpdateKeeper(address keeper, bool isAlive);
@@ -174,8 +181,6 @@ contract OrderBook is Governable, ReentrancyGuard {
         address _collateralToken,
         uint256 _tokenBase,
         uint256 _minExecutionFee,
-        uint256 _minMargin,
-        uint256 _maxMargin,
         address _feeCalculator
     ) public {
         admin = msg.sender;
@@ -184,8 +189,6 @@ contract OrderBook is Governable, ReentrancyGuard {
         collateralToken = _collateralToken;
         tokenBase = _tokenBase;
         minExecutionFee = _minExecutionFee;
-        minMargin = _minMargin;
-        maxMargin = _maxMargin;
         feeCalculator = _feeCalculator;
     }
 
@@ -202,15 +205,14 @@ contract OrderBook is Governable, ReentrancyGuard {
         emit UpdateMinExecutionFee(_minExecutionFee);
     }
 
-    function setMargins(uint256 _minMargin, uint256 _maxMargin) external onlyAdmin {
-        minMargin = _minMargin;
-        maxMargin = _maxMargin;
-        emit UpdateMargin(_minMargin, _maxMargin);
+    function setMinTimeExecuteDelay(uint256 _minTimeExecuteDelay) external onlyAdmin {
+        minTimeExecuteDelay = _minTimeExecuteDelay;
+        emit UpdateMinTimeExecuteDelay(_minTimeExecuteDelay);
     }
 
-    function setMinTimeDelay(uint256 _minTimeDelay) external onlyAdmin {
-        minTimeDelay = _minTimeDelay;
-        emit UpdateMinTimeDelay(_minTimeDelay);
+    function setMinTimeCancelDelay(uint256 _minTimeCancelDelay) external onlyAdmin {
+        minTimeCancelDelay = _minTimeCancelDelay;
+        emit UpdateMinTimeCancelDelay(_minTimeCancelDelay);
     }
 
     function setKeeper(address _account, bool _isActive) external onlyAdmin {
@@ -231,7 +233,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         address[] memory _closeAddresses,
         uint256[] memory _closeOrderIndexes,
         address payable _feeReceiver
-    ) external nonReentrant onlyKeeper {
+    ) external onlyKeeper {
         IOracle(oracle).setPrices(tokens, prices);
         executeOrders(_openAddresses, _openOrderIndexes, _closeAddresses, _closeOrderIndexes, _feeReceiver);
     }
@@ -242,15 +244,19 @@ contract OrderBook is Governable, ReentrancyGuard {
         address[] memory _closeAddresses,
         uint256[] memory _closeOrderIndexes,
         address payable _feeReceiver
-    ) public nonReentrant {
+    ) public {
         require(_openAddresses.length == _openOrderIndexes.length && _closeAddresses.length == _closeOrderIndexes.length, "OrderBook: not same length");
         for (uint256 i = 0; i < _openAddresses.length; i++) {
             try this.executeOpenOrder(_openAddresses[i], _openOrderIndexes[i], _feeReceiver) {
-            } catch {}
+            } catch Error(string memory executionError) {
+                emit ExecuteOpenOrderError(_openAddresses[i], _openOrderIndexes[i], executionError);
+            } catch (bytes memory /*lowLevelData*/) {}
         }
         for (uint256 i = 0; i < _closeAddresses.length; i++) {
             try this.executeCloseOrder(_closeAddresses[i], _closeOrderIndexes[i], _feeReceiver) {
-            } catch {}
+            } catch Error(string memory executionError) {
+                emit ExecuteCloseOrderError(_closeAddresses[i], _closeOrderIndexes[i], executionError);
+            } catch (bytes memory /*lowLevelData*/) {}
         }
     }
 
@@ -334,17 +340,19 @@ contract OrderBook is Governable, ReentrancyGuard {
     ) external payable nonReentrant {
         require(_executionFee >= minExecutionFee, "OrderBook: insufficient execution fee");
 
+        uint256 tradeFee = getTradeFeeRate(_productId, msg.sender) * _margin * _leverage / (FEE_BASE * BASE);
         if (IERC20(collateralToken).isETH()) {
-            IERC20(collateralToken).uniTransferFromSenderToThis((_executionFee + _margin) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransferFromSenderToThis((_executionFee + _margin + tradeFee) * tokenBase / BASE);
         } else {
             require(msg.value == _executionFee * 1e18 / BASE, "OrderBook: incorrect execution fee transferred");
-            IERC20(collateralToken).uniTransferFromSenderToThis(_margin * tokenBase / BASE);
+            IERC20(collateralToken).uniTransferFromSenderToThis((_margin + tradeFee) * tokenBase / BASE);
         }
 
         _createOpenOrder(
             msg.sender,
             _productId,
             _margin,
+            tradeFee,
             _leverage,
             _isLong,
             _triggerPrice,
@@ -357,6 +365,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         address _account,
         uint256 _productId,
         uint256 _margin,
+        uint256 _tradeFee,
         uint256 _leverage,
         bool _isLong,
         uint256 _triggerPrice,
@@ -369,6 +378,7 @@ contract OrderBook is Governable, ReentrancyGuard {
             _productId,
             _margin,
             _leverage,
+            _tradeFee,
             _isLong,
             _triggerPrice,
             _triggerAboveThreshold,
@@ -383,6 +393,7 @@ contract OrderBook is Governable, ReentrancyGuard {
             _productId,
             _margin,
             _leverage,
+            _tradeFee,
             _isLong,
             _triggerPrice,
             _triggerAboveThreshold,
@@ -399,8 +410,13 @@ contract OrderBook is Governable, ReentrancyGuard {
     ) external nonReentrant {
         OpenOrder storage order = openOrders[msg.sender][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
-
-        order.leverage = _leverage;
+        if (order.leverage != _leverage) {
+            uint256 margin = (order.margin + order.tradeFee) * BASE / (BASE + getTradeFeeRate(order.productId, order.account) * _leverage / 10**4);
+            uint256 tradeFee = order.tradeFee + order.margin - margin;
+            order.margin = margin;
+            order.tradeFee = tradeFee;
+            order.leverage = _leverage;
+        }
         order.triggerPrice = _triggerPrice;
         order.triggerAboveThreshold = _triggerAboveThreshold;
         order.orderTimestamp = block.timestamp;
@@ -410,7 +426,8 @@ contract OrderBook is Governable, ReentrancyGuard {
             _orderIndex,
             order.productId,
             order.margin,
-            _leverage,
+            order.leverage,
+            order.tradeFee,
             order.isLong,
             _triggerPrice,
             _triggerAboveThreshold,
@@ -421,13 +438,14 @@ contract OrderBook is Governable, ReentrancyGuard {
     function cancelOpenOrder(uint256 _orderIndex) public nonReentrant {
         OpenOrder memory order = openOrders[msg.sender][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
+        require(order.orderTimestamp + minTimeCancelDelay < block.timestamp, "OrderBook: min time cancel delay not yet passed");
 
         delete openOrders[msg.sender][_orderIndex];
 
         if (IERC20(collateralToken).isETH()) {
-            IERC20(collateralToken).uniTransfer(msg.sender, (order.executionFee + order.margin) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransfer(msg.sender, (order.executionFee + order.margin + order.tradeFee) * tokenBase / BASE);
         } else {
-            IERC20(collateralToken).uniTransfer(msg.sender, order.margin * tokenBase / BASE);
+            IERC20(collateralToken).uniTransfer(msg.sender, (order.margin + order.tradeFee) * tokenBase / BASE);
             payable(msg.sender).sendValue(order.executionFee * 1e18 / BASE);
         }
 
@@ -436,6 +454,7 @@ contract OrderBook is Governable, ReentrancyGuard {
             _orderIndex,
             order.productId,
             order.margin,
+            order.tradeFee,
             order.leverage,
             order.isLong,
             order.triggerPrice,
@@ -448,7 +467,7 @@ contract OrderBook is Governable, ReentrancyGuard {
     function executeOpenOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) public nonReentrant {
         OpenOrder memory order = openOrders[_address][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
-        require(order.orderTimestamp + minTimeDelay < block.timestamp, "OrderBook: min time delay not yet passed");
+        require(order.orderTimestamp + minTimeExecuteDelay < block.timestamp, "OrderBook: min time execute delay not yet passed");
 
         (uint256 currentPrice, ) = validatePositionOrderPrice(
             order.isLong,
@@ -458,14 +477,13 @@ contract OrderBook is Governable, ReentrancyGuard {
         );
 
         delete openOrders[_address][_orderIndex];
-        // deduct trading fee from margin
-        uint256 margin = order.margin * BASE / (BASE + getTradeFeeRate(order.productId, order.margin, order.leverage, order.account) * order.leverage / 10**4);
+
         if (IERC20(collateralToken).isETH()) {
-            IPikaPerp(pikaPerp).openPosition{value: order.margin * tokenBase / BASE }(_address, order.productId, margin, order.isLong, order.leverage);
+            IPikaPerp(pikaPerp).openPosition{value: (order.margin + order.tradeFee) * tokenBase / BASE }(_address, order.productId, order.margin, order.isLong, order.leverage);
         } else {
             IERC20(collateralToken).safeApprove(pikaPerp, 0);
-            IERC20(collateralToken).safeApprove(pikaPerp, order.margin * tokenBase / BASE);
-            IPikaPerp(pikaPerp).openPosition(_address, order.productId, margin, order.isLong, order.leverage);
+            IERC20(collateralToken).safeApprove(pikaPerp, (order.margin + order.tradeFee) * tokenBase / BASE);
+            IPikaPerp(pikaPerp).openPosition(_address, order.productId, order.margin, order.isLong, order.leverage);
         }
 
         // pay executor
@@ -475,8 +493,9 @@ contract OrderBook is Governable, ReentrancyGuard {
             order.account,
             _orderIndex,
             order.productId,
-            margin,
+            order.margin,
             order.leverage,
+            order.tradeFee,
             order.isLong,
             order.triggerPrice,
             order.triggerAboveThreshold,
@@ -543,7 +562,7 @@ contract OrderBook is Governable, ReentrancyGuard {
     function executeCloseOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) public nonReentrant {
         CloseOrder memory order = closeOrders[_address][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
-        require(order.orderTimestamp + minTimeDelay < block.timestamp, "OrderBook: min time delay not yet passed");
+        require(order.orderTimestamp + minTimeExecuteDelay < block.timestamp, "OrderBook: min time execute delay not yet passed");
         (,uint256 leverage,,,,,,,) = IPikaPerp(pikaPerp).getPosition(_address, order.productId, order.isLong);
         (uint256 currentPrice, ) = validatePositionOrderPrice(
             !order.isLong,
@@ -575,6 +594,7 @@ contract OrderBook is Governable, ReentrancyGuard {
     function cancelCloseOrder(uint256 _orderIndex) public nonReentrant {
         CloseOrder memory order = closeOrders[msg.sender][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
+        require(order.orderTimestamp + minTimeCancelDelay < block.timestamp, "OrderBook: min time cancel delay not yet passed");
 
         delete closeOrders[msg.sender][_orderIndex];
 
@@ -619,7 +639,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         );
     }
 
-    function getTradeFeeRate(uint256 _productId, uint256 _margin, uint256 _leverage, address _account) private returns(uint256) {
+    function getTradeFeeRate(uint256 _productId, address _account) private returns(uint256) {
         (address productToken,,uint256 fee,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
         return IFeeCalculator(feeCalculator).getFee(productToken, fee, _account, msg.sender);
     }

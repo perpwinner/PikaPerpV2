@@ -23,9 +23,11 @@ contract PositionManager is Governable, ReentrancyGuard {
         uint256 productId;
         uint256 margin;
         uint256 leverage;
+        uint256 tradeFee;
         bool isLong;
         uint256 acceptablePrice;
         uint256 executionFee;
+        uint256 index;
         uint256 blockNumber;
         uint256 blockTime;
     }
@@ -37,6 +39,7 @@ contract PositionManager is Governable, ReentrancyGuard {
         bool isLong;
         uint256 acceptablePrice;
         uint256 executionFee;
+        uint256 index;
         uint256 blockNumber;
         uint256 blockTime;
     }
@@ -49,12 +52,17 @@ contract PositionManager is Governable, ReentrancyGuard {
     address public immutable collateralToken;
     uint256 public minExecutionFee;
 
-    uint256 public minBlockDelayKeeper;
-    uint256 public minTimeDelayPublic;
+    uint256 public minBlockDelayPositionKeeper;
+    uint256 public minBlockDelayPriceKeeper;
+    uint256 public minTimeExecuteDelayPublic;
+    uint256 public minTimeCancelDelayPublic;
     uint256 public maxTimeDelay;
 
-    bool public isUserSettleEnabled = true;
+    bool public isUserExecuteEnabled = true;
+    bool public isUserCancelEnabled = true;
     bool public allowPublicKeeper = false;
+    bool public allowUserCloseOnly = false;
+    bool public isPriceKeeperCall = false;
 
     bytes32[] public openPositionRequestKeys;
     bytes32[] public closePositionRequestKeys;
@@ -64,8 +72,10 @@ contract PositionManager is Governable, ReentrancyGuard {
 
     uint256 public immutable tokenBase;
     uint256 public constant BASE = 1e8;
+    uint256 public constant FEE_BASE = 1e4;
 
     mapping (address => bool) public isPositionKeeper;
+    mapping (address => bool) public isPriceKeeper;
 
     mapping (address => uint256) public openPositionsIndex;
     mapping (bytes32 => OpenPositionRequest) public openPositionRequests;
@@ -78,6 +88,7 @@ contract PositionManager is Governable, ReentrancyGuard {
         uint256 productId,
         uint256 margin,
         uint256 leverage,
+        uint256 tradeFee,
         bool isLong,
         uint256 acceptablePrice,
         uint256 executionFee,
@@ -92,21 +103,25 @@ contract PositionManager is Governable, ReentrancyGuard {
         uint256 productId,
         uint256 margin,
         uint256 leverage,
+        uint256 tradeFee,
         bool isLong,
         uint256 acceptablePrice,
         uint256 executionFee,
+        uint256 index,
         uint256 blockGap,
         uint256 timeGap
     );
 
-    event CancelIncreasePosition(
+    event CancelOpenPosition(
         address indexed account,
         uint256 productId,
         uint256 margin,
         uint256 leverage,
+        uint256 tradeFee,
         bool isLong,
         uint256 acceptablePrice,
         uint256 executionFee,
+        uint256 index,
         uint256 blockGap,
         uint256 timeGap
     );
@@ -130,6 +145,7 @@ contract PositionManager is Governable, ReentrancyGuard {
         bool isLong,
         uint256 acceptablePrice,
         uint256 executionFee,
+        uint256 index,
         uint256 blockGap,
         uint256 timeGap
     );
@@ -141,26 +157,36 @@ contract PositionManager is Governable, ReentrancyGuard {
         bool isLong,
         uint256 acceptablePrice,
         uint256 executionFee,
+        uint256 index,
         uint256 blockGap,
         uint256 timeGap
     );
-    event ExecuteOpenPositionError(bytes32, address, string);
-    event ExecuteClosePositionError(bytes32, address, string);
+    event ExecuteOpenPositionError(address, uint256, string);
+    event ExecuteClosePositionError(address, uint256, string);
     event SetPositionKeeper(address indexed account, bool isActive);
+    event SetPriceKeeper(address indexed account, bool isActive);
     event SetMinExecutionFee(uint256 minExecutionFee);
-    event SetIsUserSettleEnabled(bool isUserSettleEnabled);
-    event SetDelayValues(uint256 minBlockDelayKeeper, uint256 minTimeDelayPublic, uint256 maxTimeDelay);
+    event SetIsUserExecuteEnabled(bool isUserExecuteEnabled);
+    event SetIsUserCancelEnabled(bool isUserCancelEnabled);
+    event SetDelayValues(uint256 minBlockDelayPositionKeeper, uint256 minBlockDelayPriceKeeper, uint256 minTimeExecuteDelayPublic,
+        uint256 minTimeCancelDelayPublic, uint256 maxTimeDelay);
     event SetRequestKeysStartValues(uint256 increasePositionRequestKeysStart, uint256 decreasePositionRequestKeysStart);
     event SetAllowPublicKeeper(bool allowPublicKeeper);
+    event SetAllowUserCloseOnly(bool allowUserCloseOnly);
     event SetAdmin(address admin);
 
     modifier onlyPositionKeeper() {
-        require(isPositionKeeper[msg.sender], "PositionManager: forbidden");
+        require(isPositionKeeper[msg.sender], "PositionManager: !positionKeeper");
+        _;
+    }
+
+    modifier onlyPriceKeeper() {
+        require(isPriceKeeper[msg.sender], "PositionManager: !priceKeeper");
         _;
     }
 
     modifier onlyAdmin() {
-        require(msg.sender == admin, "PositionManager: forbidden");
+        require(msg.sender == admin, "PositionManager: !admin");
         _;
     }
 
@@ -194,21 +220,39 @@ contract PositionManager is Governable, ReentrancyGuard {
         emit SetPositionKeeper(_account, _isActive);
     }
 
+    function setPriceKeeper(address _account, bool _isActive) external onlyAdmin {
+        isPriceKeeper[_account] = _isActive;
+        emit SetPriceKeeper(_account, _isActive);
+    }
+
     function setMinExecutionFee(uint256 _minExecutionFee) external onlyAdmin {
         minExecutionFee = _minExecutionFee;
         emit SetMinExecutionFee(_minExecutionFee);
     }
 
-    function setIsUserSettleEnabled(bool _isUserSettleEnabled) external onlyAdmin {
-        isUserSettleEnabled = _isUserSettleEnabled;
-        emit SetIsUserSettleEnabled(_isUserSettleEnabled);
+    function setIsUserExecuteEnabled(bool _isUserExecuteEnabled) external onlyAdmin {
+        isUserExecuteEnabled = _isUserExecuteEnabled;
+        emit SetIsUserExecuteEnabled(_isUserExecuteEnabled);
     }
 
-    function setDelayValues(uint256 _minBlockDelayKeeper, uint256 _minTimeDelayPublic, uint256 _maxTimeDelay) external onlyAdmin {
-        minBlockDelayKeeper = _minBlockDelayKeeper;
-        minTimeDelayPublic = _minTimeDelayPublic;
+    function setIsUserCancelEnabled(bool _isUserCancelEnabled) external onlyAdmin {
+        isUserCancelEnabled = _isUserCancelEnabled;
+        emit SetIsUserCancelEnabled(_isUserCancelEnabled);
+    }
+
+    function setDelayValues(
+        uint256 _minBlockDelayPositionKeeper,
+        uint256 _minBlockDelayPriceKeeper,
+        uint256 _minTimeExecuteDelayPublic,
+        uint256 _minTimeCancelDelayPublic,
+        uint256 _maxTimeDelay
+    ) external onlyAdmin {
+        minBlockDelayPositionKeeper = _minBlockDelayPositionKeeper;
+        minBlockDelayPriceKeeper = _minBlockDelayPriceKeeper;
+        minTimeExecuteDelayPublic = _minTimeExecuteDelayPublic;
+        minTimeCancelDelayPublic = _minTimeCancelDelayPublic;
         maxTimeDelay = _maxTimeDelay;
-        emit SetDelayValues(_minBlockDelayKeeper, _minTimeDelayPublic, _maxTimeDelay);
+        emit SetDelayValues(_minBlockDelayPositionKeeper, _minBlockDelayPriceKeeper, _minTimeExecuteDelayPublic, _minTimeCancelDelayPublic, _maxTimeDelay);
     }
 
     function setRequestKeysStartValues(uint256 _increasePositionRequestKeysStart, uint256 _decreasePositionRequestKeysStart) external onlyAdmin {
@@ -223,9 +267,23 @@ contract PositionManager is Governable, ReentrancyGuard {
         emit SetAllowPublicKeeper(_allowPublicKeeper);
     }
 
+    function setAllowUserCloseOnly(bool _allowUserCloseOnly) external onlyAdmin {
+        allowUserCloseOnly = _allowUserCloseOnly;
+        emit SetAllowUserCloseOnly(_allowUserCloseOnly);
+    }
+
     function setAdmin(address _admin) external onlyGov {
         admin = _admin;
         emit SetAdmin(_admin);
+    }
+
+    function setPricesAndExecuteNPositions(
+        address[] memory tokens,
+        uint256[] memory prices,
+        uint256 n,
+        address payable _executionFeeReceiver
+    ) external {
+        setPricesAndExecutePositions(tokens, prices, openPositionRequestKeysStart + n, closePositionRequestKeysStart + n, _executionFeeReceiver);
     }
 
     function setPricesAndExecutePositions(
@@ -234,9 +292,16 @@ contract PositionManager is Governable, ReentrancyGuard {
         uint256 _openEndIndex,
         uint256 _closeEndIndex,
         address payable _executionFeeReceiver
-    ) external onlyPositionKeeper {
+    ) public onlyPriceKeeper {
+        isPriceKeeperCall = true;
         IOracle(oracle).setPrices(tokens, prices);
         executePositions(_openEndIndex, _closeEndIndex, _executionFeeReceiver);
+        isPriceKeeperCall = false;
+    }
+
+    function executeNPositions(uint256 n, address payable _executionFeeReceiver) external {
+        require(canPositionKeeperExecute(), "PositionManager: cannot execute");
+        executePositions(openPositionRequestKeysStart + n, closePositionRequestKeysStart + n, _executionFeeReceiver);
     }
 
     function executePositions(uint256 _openEndIndex, uint256 _closeEndIndex, address payable _executionFeeReceiver) public {
@@ -266,7 +331,7 @@ contract PositionManager is Governable, ReentrancyGuard {
             try this.executeOpenPosition(key, _executionFeeReceiver) returns (bool _wasExecuted) {
                 if (!_wasExecuted) { break; }
             } catch Error(string memory executionError) {
-                emit ExecuteOpenPositionError(key, openPositionRequests[key].account, executionError);
+                emit ExecuteOpenPositionError(openPositionRequests[key].account, index, executionError);
                 // wrap this call in a try catch to prevent invalid cancels from blocking the loop
                 try this.cancelOpenPosition(key, _executionFeeReceiver) returns (bool _wasCancelled) {
                     if (!_wasCancelled) { break; }
@@ -306,7 +371,7 @@ contract PositionManager is Governable, ReentrancyGuard {
             try this.executeClosePosition(key, _executionFeeReceiver) returns (bool _wasExecuted) {
                 if (!_wasExecuted) { break; }
             }  catch Error(string memory executionError)  {
-                emit ExecuteClosePositionError(key, closePositionRequests[key].account, executionError);
+                emit ExecuteClosePositionError(closePositionRequests[key].account, index, executionError);
                 // wrap this call in a try catch to prevent invalid cancels from blocking the loop
                 try this.cancelClosePosition(key, _executionFeeReceiver) returns (bool _wasCancelled) {
                     if (!_wasCancelled) { break; }
@@ -335,17 +400,19 @@ contract PositionManager is Governable, ReentrancyGuard {
     ) external payable nonReentrant {
         require(_executionFee >= minExecutionFee, "PositionManager: invalid executionFee");
 
+        uint256 tradeFee = getTradeFeeRate(_productId, msg.sender) * _margin * _leverage / (FEE_BASE * BASE);
         if (IERC20(collateralToken).isETH()) {
-            IERC20(collateralToken).uniTransferFromSenderToThis((_executionFee + _margin) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransferFromSenderToThis((_executionFee + _margin + tradeFee) * tokenBase / BASE);
         } else {
             require(msg.value == _executionFee * 1e18 / BASE, "PositionManager: incorrect execution fee transferred");
-            IERC20(collateralToken).uniTransferFromSenderToThis(_margin * tokenBase / BASE);
+            IERC20(collateralToken).uniTransferFromSenderToThis((_margin + tradeFee) * tokenBase / BASE);
         }
 
         _createOpenPosition(
             msg.sender,
             _productId,
             _margin,
+            tradeFee,
             _leverage,
             _isLong,
             _acceptablePrice,
@@ -387,18 +454,17 @@ contract PositionManager is Governable, ReentrancyGuard {
         // if the request was already executed or cancelled, return true so that the executeOpenPositions loop will continue executing the next request
         if (request.account == address(0)) { return true; }
 
-        bool shouldExecute = _validateExecution(request.blockNumber, request.blockTime, request.account, request.productId, request.isLong, request.acceptablePrice);
+        bool shouldExecute = _validateExecution(request.blockNumber, request.blockTime, request.account, request.productId, true, request.isLong, request.acceptablePrice);
         if (!shouldExecute) { return false; }
 
         delete openPositionRequests[_key];
 
-        uint256 margin = request.margin * BASE / (BASE + getTradeFeeRate(request.productId, request.margin, request.leverage, request.account) * request.leverage / 10**4);
         if (IERC20(collateralToken).isETH()) {
-            IPikaPerp(pikaPerp).openPosition{value: request.margin * tokenBase / BASE }(request.account, request.productId, margin, request.isLong, request.leverage);
+            IPikaPerp(pikaPerp).openPosition{value: (request.margin + request.tradeFee) * tokenBase / BASE }(request.account, request.productId, request.margin, request.isLong, request.leverage);
         } else {
             IERC20(collateralToken).safeApprove(pikaPerp, 0);
-            IERC20(collateralToken).safeApprove(pikaPerp, request.margin * tokenBase / BASE);
-            IPikaPerp(pikaPerp).openPosition(request.account, request.productId, margin, request.isLong, request.leverage);
+            IERC20(collateralToken).safeApprove(pikaPerp, (request.margin + request.tradeFee) * tokenBase / BASE);
+            IPikaPerp(pikaPerp).openPosition(request.account, request.productId, request.margin, request.isLong, request.leverage);
         }
 
         _executionFeeReceiver.sendValue(request.executionFee * 1e18 / BASE);
@@ -408,9 +474,11 @@ contract PositionManager is Governable, ReentrancyGuard {
             request.productId,
             request.margin,
             request.leverage,
+            request.tradeFee,
             request.isLong,
             request.acceptablePrice,
             request.executionFee,
+            request.index,
             block.number.sub(request.blockNumber),
             block.timestamp.sub(request.blockTime)
         );
@@ -429,21 +497,23 @@ contract PositionManager is Governable, ReentrancyGuard {
         delete openPositionRequests[_key];
 
         if (IERC20(collateralToken).isETH()) {
-            IERC20(collateralToken).uniTransfer(request.account, request.margin * tokenBase / BASE);
+            IERC20(collateralToken).uniTransfer(request.account, (request.margin + request.tradeFee) * tokenBase / BASE);
             IERC20(collateralToken).uniTransfer(_executionFeeReceiver, request.executionFee * tokenBase / BASE);
         } else {
-            IERC20(collateralToken).uniTransfer(request.account, request.margin * tokenBase / BASE);
+            IERC20(collateralToken).uniTransfer(request.account, (request.margin + request.tradeFee) * tokenBase / BASE);
             payable(_executionFeeReceiver).sendValue(request.executionFee * 1e18 / BASE);
         }
 
-        emit CancelIncreasePosition(
+        emit CancelOpenPosition(
             request.account,
             request.productId,
             request.margin,
             request.leverage,
+            request.tradeFee,
             request.isLong,
             request.acceptablePrice,
             request.executionFee,
+            request.index,
             block.number.sub(request.blockNumber),
             block.timestamp.sub(request.blockTime)
         );
@@ -456,7 +526,7 @@ contract PositionManager is Governable, ReentrancyGuard {
         // if the request was already executed or cancelled, return true so that the executeClosePositions loop will continue executing the next request
         if (request.account == address(0)) { return true; }
 
-        bool shouldExecute = _validateExecution(request.blockNumber, request.blockTime, request.account, request.productId, !request.isLong, request.acceptablePrice);
+        bool shouldExecute = _validateExecution(request.blockNumber, request.blockTime, request.account, request.productId, false, !request.isLong, request.acceptablePrice);
         if (!shouldExecute) { return false; }
 
         delete closePositionRequests[_key];
@@ -472,6 +542,7 @@ contract PositionManager is Governable, ReentrancyGuard {
             request.isLong,
             request.acceptablePrice,
             request.executionFee,
+            request.index,
             block.number.sub(request.blockNumber),
             block.timestamp.sub(request.blockTime)
         );
@@ -498,6 +569,7 @@ contract PositionManager is Governable, ReentrancyGuard {
                 request.isLong,
                 request.acceptablePrice,
                 request.executionFee,
+                request.index,
                 block.number.sub(request.blockNumber),
                 block.timestamp.sub(request.blockTime)
             );
@@ -525,16 +597,30 @@ contract PositionManager is Governable, ReentrancyGuard {
         return closePositionRequests[_key];
     }
 
+    function canPriceKeeperExecute() public view returns(bool) {
+        return (openPositionRequestKeysStart < openPositionRequestKeys.length &&
+        openPositionRequests[openPositionRequestKeys[openPositionRequestKeysStart]].blockNumber.add(minBlockDelayPriceKeeper) <= block.timestamp) ||
+        (closePositionRequestKeysStart < closePositionRequestKeys.length &&
+        closePositionRequests[closePositionRequestKeys[closePositionRequestKeysStart]].blockNumber.add(minBlockDelayPriceKeeper) <= block.timestamp);
+    }
+
+    function canPositionKeeperExecute() public view returns(bool) {
+        return (openPositionRequestKeysStart < openPositionRequestKeys.length &&
+            openPositionRequests[openPositionRequestKeys[openPositionRequestKeysStart]].blockNumber.add(minBlockDelayPositionKeeper) <= block.timestamp) ||
+            (closePositionRequestKeysStart < closePositionRequestKeys.length &&
+            closePositionRequests[closePositionRequestKeys[closePositionRequestKeysStart]].blockNumber.add(minBlockDelayPositionKeeper) <= block.timestamp);
+    }
+
     function _validateExecution(uint256 _positionBlockNumber, uint256 _positionBlockTime, address _account,
-        uint256 _productId, bool _isLong, uint256 _acceptablePrice
+        uint256 _productId, bool _isOpen, bool _isLong, uint256 _acceptablePrice
     ) internal view returns (bool) {
-        if (_positionBlockTime.add(maxTimeDelay) <= block.timestamp && _isLong) {
+        if (_positionBlockTime.add(maxTimeDelay) <= block.timestamp) {
             revert("PositionManager: request has expired");
         }
 
         bool isKeeperCall = msg.sender == address(this) || isPositionKeeper[msg.sender];
 
-        if (!isUserSettleEnabled && !isKeeperCall) {
+        if (!isUserExecuteEnabled && !isKeeperCall) {
             revert("PositionManager: forbidden");
         }
 
@@ -546,12 +632,13 @@ contract PositionManager is Governable, ReentrancyGuard {
             } else {
                 require(price >= _acceptablePrice, "PositionManager: current price too high");
             }
-            return _positionBlockNumber.add(minBlockDelayKeeper) <= block.number;
+            return isPriceKeeperCall ? _positionBlockNumber.add(minBlockDelayPriceKeeper) <= block.number :
+                _positionBlockNumber.add(minBlockDelayPositionKeeper) <= block.number;
         }
 
-        require(msg.sender == _account || allowPublicKeeper, "PositionManager: forbidden");
+        require((!_isOpen || !allowUserCloseOnly) && (msg.sender == _account || allowPublicKeeper), "PositionManager: forbidden");
 
-        require(_positionBlockTime.add(minTimeDelayPublic) <= block.timestamp, "PositionManager: min delay not yet passed for execution");
+        require(_positionBlockTime.add(minTimeExecuteDelayPublic) <= block.timestamp, "PositionManager: min delay not yet passed for execution");
 
         return true;
     }
@@ -559,17 +646,18 @@ contract PositionManager is Governable, ReentrancyGuard {
     function _validateCancellation(uint256 _positionBlockNumber, uint256 _positionBlockTime, address _account) internal view returns (bool) {
         bool isKeeperCall = msg.sender == address(this) || isPositionKeeper[msg.sender];
 
-        if (!isUserSettleEnabled && !isKeeperCall) {
+        if (!isUserCancelEnabled && !isKeeperCall) {
             revert("PositionManager: forbidden");
         }
 
         if (isKeeperCall) {
-            return _positionBlockNumber.add(minBlockDelayKeeper) <= block.number;
+            return isPriceKeeperCall ? _positionBlockNumber.add(minBlockDelayPriceKeeper) <= block.number :
+            _positionBlockNumber.add(minBlockDelayPositionKeeper) <= block.number;
         }
 
         require(msg.sender == _account, "PositionManager: forbidden");
 
-        require(_positionBlockTime.add(minTimeDelayPublic) <= block.timestamp, "PositionManager: min delay not yet passed for cancellation");
+        require(_positionBlockTime.add(minTimeCancelDelayPublic) <= block.timestamp, "PositionManager: min delay not yet passed for cancellation");
 
         return true;
     }
@@ -578,6 +666,7 @@ contract PositionManager is Governable, ReentrancyGuard {
         address _account,
         uint256 _productId,
         uint256 _margin,
+        uint256 _tradeFee,
         uint256 _leverage,
         bool _isLong,
         uint256 _acceptablePrice,
@@ -591,9 +680,11 @@ contract PositionManager is Governable, ReentrancyGuard {
             _productId,
             _margin,
             _leverage,
+            _tradeFee,
             _isLong,
             _acceptablePrice,
             _executionFee,
+            index,
             block.number,
             block.timestamp
         );
@@ -608,6 +699,7 @@ contract PositionManager is Governable, ReentrancyGuard {
             _productId,
             _margin,
             _leverage,
+            _tradeFee,
             _isLong,
             _acceptablePrice,
             _executionFee,
@@ -636,6 +728,7 @@ contract PositionManager is Governable, ReentrancyGuard {
             _isLong,
             _acceptablePrice,
             _executionFee,
+            index,
             block.number,
             block.timestamp
         );
@@ -658,7 +751,7 @@ contract PositionManager is Governable, ReentrancyGuard {
         );
     }
 
-    function getTradeFeeRate(uint256 _productId, uint256 _margin, uint256 _leverage, address _account) private returns(uint256) {
+    function getTradeFeeRate(uint256 _productId, address _account) private returns(uint256) {
         (address productToken,,uint256 fee,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
         return IFeeCalculator(feeCalculator).getFee(productToken, fee, _account, msg.sender);
     }

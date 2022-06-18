@@ -95,7 +95,8 @@ contract PikaPerpV3 is ReentrancyGuard {
     bool private canUserStake = false;
     bool private allowPublicLiquidator = false;
     bool private isTradeEnabled = true;
-    bool private isManagerOnly = false;
+    bool private isManagerOnlyForOpen = false;
+    bool private isManagerOnlyForClose = false;
     Vault private vault;
     uint256 private constant BASE = 10**8;
 
@@ -289,7 +290,7 @@ contract PikaPerpV3 is ReentrancyGuard {
         bool isLong,
         uint256 leverage
     ) public payable nonReentrant {
-        require(_validateManager(user) || (!isManagerOnly && user == msg.sender), "!allowed");
+        require(_validateManager(user) || (!isManagerOnlyForOpen && user == msg.sender), "!allowed");
         require(isTradeEnabled, "!enabled");
         // Check params
         require(margin >= minMargin && margin < type(uint64).max, "!margin");
@@ -395,7 +396,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     ) public nonReentrant {
         // Check position
         Position storage position = positions[positionId];
-        require(_validateManager(position.owner) || (!isManagerOnly && msg.sender == position.owner), "!close");
+        require(_validateManager(position.owner) || (!isManagerOnlyForClose && msg.sender == position.owner), "!close");
 
         // Check product
         Product storage product = products[uint256(position.productId)];
@@ -860,18 +861,20 @@ contract PikaPerpV3 is ReentrancyGuard {
         uint256 _minProfitTime,
         bool _canUserStake,
         bool _allowPublicLiquidator,
-        bool _isManagerOnly,
+        bool _isManagerOnlyForOpen,
+        bool _isManagerOnlyForClose,
         uint256 _exposureMultiplier,
         uint256 _utilizationMultiplier,
         uint256 _shiftDivider
     ) external {
         onlyOwner();
-        require(_maxShift <= 0.01e8 && _minProfitTime <= 24 hours && _utilizationMultiplier <= 10**4 && _shiftDivider > 0);
+        require(_maxShift <= 0.01e8 && _minProfitTime <= 24 hours && _shiftDivider > 0);
         maxShift = _maxShift;
         minProfitTime = _minProfitTime;
         canUserStake = _canUserStake;
         allowPublicLiquidator = _allowPublicLiquidator;
-        isManagerOnly = _isManagerOnly;
+        isManagerOnlyForOpen = _isManagerOnlyForOpen;
+        isManagerOnlyForClose = _isManagerOnlyForClose;
         exposureMultiplier = _exposureMultiplier;
         utilizationMultiplier = _utilizationMultiplier;
         shiftDivider = _shiftDivider;

@@ -109,7 +109,7 @@ describe("Trading ETH", () => {
 
 		const orderbookContract = await ethers.getContractFactory("OrderBook");
 		orderbook = await orderbookContract.deploy(trading.address, oracle.address, "0x0000000000000000000000000000000000000000", "1000000000000000000",
-			"100000", "100000", "10000000000", feeCalculator.address);
+			"100000", feeCalculator.address);
 
 		let v = [
 			100000000000, //1k eth cap
@@ -356,7 +356,7 @@ describe("Trading ETH", () => {
 			latestPrice = 2760e8;
 			// const price3 = _calculatePriceWithFee(oracle.address, 10, false, margin*leverage/1e8, 0, 100000000e8, 50000000e8, margin*leverage/1e8);
 			await oracle.setPrice(2760e8);
-			await trading.setParameters("300000", "43200", true, true, false, "10000", "10000", "2");
+			await trading.setParameters("300000", "43200", true, true, false, false, "10000", "10000", "2");
 			const tx3 = await trading.connect(addrs[userId]).liquidatePositions([positionId]);
 			const totalFee = getInterestFee(3*margin, leverage, 0, 500);
 			expect(await tx3).to.emit(trading, "ClosePosition").withArgs(positionId, user, productId, latestPrice, position1.price, margin.toString(), leverage.toString(), totalFee, (-1*margin).toString(), true);
@@ -489,11 +489,12 @@ describe("Trading ETH", () => {
 			const account2 = addrs[6]
 			const amount = "100000000";
 			const leverage = "100000000";
+			const tradeFee = "100000"
 			const size = amount;
 			await oracle.setPrice(3001e8);
 			await trading.connect(owner).setManager(orderbook.address, true);
 			await trading.connect(account1).setAccountManager(orderbook.address, true);
-			let ethAmount = (BigNumber.from(amount).mul(BigNumber.from("10010000000"))).add(BigNumber.from("1000000000000000"));
+			let ethAmount = ((BigNumber.from(amount).add(BigNumber.from("100000"))).mul(BigNumber.from("10010000000"))).add(BigNumber.from("1000000000000000"));
 			// create open order
 			await orderbook.connect(account1).createOpenOrder(1, amount, leverage,  true, "300000000000", false, "100000", {from: account1.address, value:
 				ethAmount, gasPrice: gasPrice})
@@ -511,6 +512,8 @@ describe("Trading ETH", () => {
 			await expect(orderbook.connect(account2).executeOpenOrder(account1.address, 1, account2.address)).to.be.revertedWith('OrderBook: invalid price for execution');
 			// update open order
 			await orderbook.connect(account1).updateOpenOrder(1, "200000000", "300100000000", false);
+			const openOrder3 = (await orderbook.getOpenOrder(account1.address, 1));
+			console.log("open order 3", openOrder3);
 			// execute open order
 			await orderbook.connect(account2).executeOpenOrder(account1.address, 1, account2.address);
 

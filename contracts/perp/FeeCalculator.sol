@@ -13,7 +13,7 @@ contract FeeCalculator is Governable {
     uint256 public threshold;
     uint256 public weightDecay;
     uint256 public baseFee = 10;
-    uint256 public n = 1;
+    uint256 public n = 5;
     uint256 public maxDynamicFee = 50; // 0.5%
     address public owner;
     address public oracle;
