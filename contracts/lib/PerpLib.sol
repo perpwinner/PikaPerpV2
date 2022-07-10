@@ -5,9 +5,11 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../oracle/IOracle.sol";
 import '../perp/IFeeCalculator.sol';
+import '../perp/IFundingManager.sol';
 
 library PerpLib {
-    uint256 public constant BASE = 10**8;
+    uint256 private constant BASE = 10**8;
+    uint256 private constant FUNDING_BASE = 10**12;
 
     function _canTakeProfit(
         bool isLong,
@@ -19,34 +21,12 @@ library PerpLib {
     ) internal view returns(bool) {
         if (block.timestamp > positionTimestamp + minProfitTime) {
             return true;
-        } else if (isLong && oraclePrice > positionOraclePrice * (1e4 + minPriceChange) / 1e4) {
+        } else if (isLong && oraclePrice > positionOraclePrice * (10**4 + minPriceChange) / (10**4)) {
             return true;
-        } else if (!isLong && oraclePrice < positionOraclePrice * (1e4 - minPriceChange) / 1e4) {
+        } else if (!isLong && oraclePrice < positionOraclePrice * (10**4 - minPriceChange) / (10**4)) {
             return true;
         }
         return false;
-    }
-
-    function _checkLiquidation(
-        bool isLong,
-        uint256 positionPrice,
-        uint256 positionLeverage,
-        uint256 price,
-        uint256 liquidationThreshold
-    ) internal pure returns (bool) {
-
-        uint256 liquidationPrice;
-        if (isLong) {
-            liquidationPrice = positionPrice - positionPrice * liquidationThreshold * 10**4 / positionLeverage;
-        } else {
-            liquidationPrice = positionPrice + positionPrice * liquidationThreshold * 10**4 / positionLeverage;
-        }
-
-        if (isLong && price <= liquidationPrice || !isLong && price >= liquidationPrice) {
-            return true;
-        } else {
-            return false;
-        }
     }
 
     function _getPnl(
@@ -81,6 +61,18 @@ library PerpLib {
         }
 
         return _pnl;
+    }
+
+    function _getFundingPayment(
+        address fundingManager,
+        bool isLong,
+        uint256 productId,
+        uint256 positionLeverage,
+        uint256 margin,
+        int256 funding
+    ) internal view returns(int256) {
+        return isLong ? int256(margin * positionLeverage) * (IFundingManager(fundingManager).getFunding(productId) - funding) / int256(BASE * FUNDING_BASE) :
+            int256(margin * positionLeverage) * (funding - IFundingManager(fundingManager).getFunding(productId)) / int256(BASE * FUNDING_BASE);
     }
 
     function _getTradeFee(

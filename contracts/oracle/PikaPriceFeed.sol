@@ -11,10 +11,15 @@ contract PikaPriceFeed is Governable {
 
     address owner;
     uint256 public lastUpdatedTime;
-    uint256 public priceDuration = 300; // 5mins
+    uint256 public priceDuration = 600; // 10 mins
+    uint256 public updateInterval = 120; // 2 mins
     mapping (address => uint256) public priceMap;
     mapping (address => uint256) public maxPriceDiff;
     mapping(address => bool) public keepers;
+    mapping (address => bool) public voters;
+    mapping (address => bool) public disableFastOracleVotes;
+    uint256 public minVoteCount = 2;
+    uint256 public disableFastOracleVote;
     bool public isChainlinkOnly = false;
     bool public isPikaOracleOnly = false;
     bool public isSpreadEnabled = false;
@@ -24,14 +29,19 @@ contract PikaPriceFeed is Governable {
 
     event PriceSet(address token, uint256 price, uint256 timestamp);
     event PriceDurationSet(uint256 priceDuration);
+    event UpdateIntervalSet(uint256 updateInterval);
     event MaxPriceDiffSet(address token, uint256 maxPriceDiff);
     event KeeperSet(address keeper, bool isActive);
+    event VoterSet(address voter, bool isActive);
     event DeltaAndDecaySet(uint256 delta, uint256 decay);
     event IsSpreadEnabledSet(bool isSpreadEnabled);
     event SpreadSet(uint256 spread);
     event IsChainlinkOnlySet(bool isChainlinkOnlySet);
     event IsPikaOracleOnlySet(bool isPikaOracleOnlySet);
     event SetOwner(address owner);
+    event DisableFastOracle(address voter);
+    event EnableFastOracle(address voter);
+    event MinVoteCountSet(uint256 minVoteCount);
 
     uint256 public constant MAX_PRICE_DURATION = 30 minutes;
     uint256 public constant PRICE_BASE = 10000;
@@ -43,10 +53,19 @@ contract PikaPriceFeed is Governable {
 
     function getPrice(address token, bool isMax) external view returns (uint256) {
         (uint256 price, bool isChainlink) = getPriceAndSource(token);
-        if (isSpreadEnabled || isChainlink) {
+        if (isSpreadEnabled || isChainlink || disableFastOracleVote >= minVoteCount) {
             return isMax ? price * (PRICE_BASE + spread) / PRICE_BASE : price * (PRICE_BASE - spread) / PRICE_BASE;
         }
         return price;
+    }
+
+    function shouldHaveSpread(address token) external view returns (bool) {
+        (,bool isChainlink) = getPriceAndSource(token);
+        return isSpreadEnabled || isChainlink || disableFastOracleVote >= minVoteCount;
+    }
+
+    function shouldUpdatePrice() external view returns (bool) {
+        return lastUpdatedTime + updateInterval < block.timestamp;
     }
 
     function getPrice(address token) public view returns (uint256) {
@@ -123,10 +142,37 @@ contract PikaPriceFeed is Governable {
         lastUpdatedTime = block.timestamp;
     }
 
+    function disableFastOracle() external onlyVoter {
+        require(!disableFastOracleVotes[msg.sender], "already voted");
+        disableFastOracleVotes[msg.sender] = true;
+        disableFastOracleVote = disableFastOracleVote + 1;
+
+        emit DisableFastOracle(msg.sender);
+    }
+
+    function enableFastOracle() external onlyVoter {
+        require(disableFastOracleVotes[msg.sender], "already enabled");
+        disableFastOracleVotes[msg.sender] = false;
+        disableFastOracleVote = disableFastOracleVote - 1;
+
+        emit EnableFastOracle(msg.sender);
+    }
+
+    function setMinVoteCount(uint256 _minVoteCount) external onlyOwner {
+        minVoteCount = _minVoteCount;
+
+        emit MinVoteCountSet(_minVoteCount);
+    }
+
     function setPriceDuration(uint256 _priceDuration) external onlyOwner {
         require(_priceDuration <= MAX_PRICE_DURATION, "!priceDuration");
         priceDuration = _priceDuration;
-        emit PriceDurationSet(priceDuration);
+        emit PriceDurationSet(_priceDuration);
+    }
+
+    function setUpdatedInterval(uint256 _updateInterval) external onlyOwner {
+        updateInterval = _updateInterval;
+        emit UpdateIntervalSet(_updateInterval);
     }
 
     function setMaxPriceDiff(address _token, uint256 _maxPriceDiff) external onlyOwner {
@@ -138,6 +184,11 @@ contract PikaPriceFeed is Governable {
     function setKeeper(address _keeper, bool _isActive) external onlyOwner {
         keepers[_keeper] = _isActive;
         emit KeeperSet(_keeper, _isActive);
+    }
+
+    function setVoter(address _voter, bool _isActive) external onlyOwner {
+        voters[_voter] = _isActive;
+        emit VoterSet(_voter, _isActive);
     }
 
     function setIsChainlinkOnly(bool _isChainlinkOnly) external onlyOwner {
@@ -169,6 +220,11 @@ contract PikaPriceFeed is Governable {
     function setOwner(address _owner) external onlyGov {
         owner = _owner;
         emit SetOwner(_owner);
+    }
+
+    modifier onlyVoter() {
+        require(voters[msg.sender], "!voter");
+        _;
     }
 
     modifier onlyKeeper() {

@@ -71,7 +71,7 @@ function assertAlmostEqual(actual, expected, accuracy = 10000000) {
 
 describe("Trading ETH", () => {
 
-	let trading, addrs = [], owner, oracle, usdc, pika, vePikaFeeReward, vaultFeeReward, vaultTokenReward, rewardToken, orderbook, feeCalculator;
+	let trading, addrs = [], owner, oracle, fundingManager, usdc, pika, vePikaFeeReward, vaultFeeReward, vaultTokenReward, rewardToken, orderbook, feeCalculator;
 
 	before(async () => {
 
@@ -81,11 +81,16 @@ describe("Trading ETH", () => {
 		const oracleContract = await ethers.getContractFactory("MockOracle");
 		oracle = await oracleContract.deploy();
 
+		const fundingManagerContract = await ethers.getContractFactory("FundingManager");
+		fundingManager = await fundingManagerContract.deploy();
+
 		const feeCalculatorContract = await ethers.getContractFactory("FeeCalculator");
 		feeCalculator = await feeCalculatorContract.deploy(40, 9000, oracle.address);
 
 		const tradingContract = await ethers.getContractFactory("PikaPerpV3");
-		trading = await tradingContract.deploy("0x0000000000000000000000000000000000000000", "1000000000000000000", oracle.address, feeCalculator.address);
+		trading = await tradingContract.deploy("0x0000000000000000000000000000000000000000", "1000000000000000000", oracle.address, feeCalculator.address, fundingManager.address);
+
+		await fundingManager.setPikaPerp(trading.address);
 
 		const pikaContract = await ethers.getContractFactory("Pika");
 		pika = await pikaContract.deploy("Pika", "PIKA", "1000000000000000000000000000", owner.address, owner.address)
@@ -128,9 +133,6 @@ describe("Trading ETH", () => {
 			true,
 			0,
 			0,
-			0, // 0% annual interest
-			80 * 100, // 80%
-			50 * 100, // 50%
 			150, // 1.5%, minPriceChange
 			10,
 			5000e8 // 5k eth
@@ -356,7 +358,7 @@ describe("Trading ETH", () => {
 			latestPrice = 2760e8;
 			// const price3 = _calculatePriceWithFee(oracle.address, 10, false, margin*leverage/1e8, 0, 100000000e8, 50000000e8, margin*leverage/1e8);
 			await oracle.setPrice(2760e8);
-			await trading.setParameters("300000", "43200", true, true, false, false, "10000", "10000", "2");
+			await trading.setParameters("1000000", "86400", true, true, false, false, "10000", "10000", "3", "5000", "8000","2");
 			const tx3 = await trading.connect(addrs[userId]).liquidatePositions([positionId]);
 			const totalFee = getInterestFee(3*margin, leverage, 0, 500);
 			expect(await tx3).to.emit(trading, "ClosePosition").withArgs(positionId, user, productId, latestPrice, position1.price, margin.toString(), leverage.toString(), totalFee, (-1*margin).toString(), true);
@@ -404,6 +406,8 @@ describe("Trading ETH", () => {
 			const startOwnerClaimableReward = await vaultFeeReward.getClaimableReward(owner.address);
 			const startAddress1ClaimableReward = await vaultFeeReward.getClaimableReward(addrs[1].address);
 			await trading.connect(owner).stake("10000000000", owner.address, {from: owner.address, value: "100000000000000000000"});
+			await trading.connect(owner).setManager(vaultFeeReward.address, true);
+			await trading.connect(owner).setAccountManager(vaultFeeReward.address, true);
 			await trading.connect(owner).openPosition(owner.address, productId, margin, true, leverage.toString(), {from: owner.address, value:  (margin*1e10 + fee*2e10).toString(), gasPrice: gasPrice});
 
 			expect((await vaultFeeReward.getClaimableReward(owner.address)).sub(startOwnerClaimableReward)).to.be.equal("5000000000000000");
@@ -494,6 +498,7 @@ describe("Trading ETH", () => {
 			await oracle.setPrice(3001e8);
 			await trading.connect(owner).setManager(orderbook.address, true);
 			await trading.connect(account1).setAccountManager(orderbook.address, true);
+			await orderbook.connect(owner).setAllowPublicKeeper(true);
 			let ethAmount = ((BigNumber.from(amount).add(BigNumber.from("100000"))).mul(BigNumber.from("10010000000"))).add(BigNumber.from("1000000000000000"));
 			// create open order
 			await orderbook.connect(account1).createOpenOrder(1, amount, leverage,  true, "300000000000", false, "100000", {from: account1.address, value:
@@ -513,14 +518,13 @@ describe("Trading ETH", () => {
 			// update open order
 			await orderbook.connect(account1).updateOpenOrder(1, "200000000", "300100000000", false);
 			const openOrder3 = (await orderbook.getOpenOrder(account1.address, 1));
-			console.log("open order 3", openOrder3);
 			// execute open order
 			await orderbook.connect(account2).executeOpenOrder(account1.address, 1, account2.address);
 
 			const position1 = await trading.getPosition(account1.address, 1, true);
 			expect(position1[0]).to.equal(productId);
 			expect(position1[5]).to.equal(account1.address);
-			expect(position1[8]).to.equal(true);
+			expect(position1[7]).to.equal(true);
 			expect(position1[1]).to.equal("200000000");
 
 			// create close order

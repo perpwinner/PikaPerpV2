@@ -30,11 +30,14 @@ interface IPikaPerp {
         uint256 margin,
         bool isLong
     ) external;
+    function liquidatePositions(uint256[] calldata positionIds) external;
     function getProduct(uint256 productId) external view returns (
-        address,uint256,uint256,bool,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256);
+        address,uint256,uint256,bool,uint256,uint256,uint256,uint256,uint256);
     function getPosition(
         address account,
         uint256 productId,
         bool isLong
-    ) external view returns (uint256,uint256,uint256,uint256,uint256,address,uint256,uint256,bool);
+    ) external view returns (uint256,uint256,uint256,uint256,uint256,address,uint256,bool,int256);
+    function getMaxExposure(uint256 productWeight) external view returns(uint256);
+    function getCumulativeFunding(uint256 _productId) external view returns(uint256);
 }

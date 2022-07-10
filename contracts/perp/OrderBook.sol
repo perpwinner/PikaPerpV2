@@ -48,15 +48,17 @@ contract OrderBook is Governable, ReentrancyGuard {
     mapping (address => uint256) public closeOrdersIndex;
     mapping (address => bool) public isKeeper;
 
-    address public admin;
     address public immutable pikaPerp;
-    address public oracle;
-    address public feeCalculator;
     address public immutable collateralToken;
     uint256 public immutable tokenBase;
+    address public admin;
+    address public oracle;
+    address public feeCalculator;
     uint256 public minExecutionFee;
     uint256 public minTimeExecuteDelay;
     uint256 public minTimeCancelDelay;
+    bool public allowPublicKeeper = false;
+    bool public isKeeperCall = false;
     uint256 public constant BASE = 1e8;
     uint256 public constant FEE_BASE = 1e4;
 
@@ -156,10 +158,11 @@ contract OrderBook is Governable, ReentrancyGuard {
         bool triggerAboveThreshold,
         uint256 orderTimestamp
     );
-    event ExecuteOpenOrderError(address, uint256, string);
-    event ExecuteCloseOrderError(address, uint256, string);
+    event ExecuteOpenOrderError(address indexed account, uint256 orderIndex, string executionError);
+    event ExecuteCloseOrderError(address indexed account, uint256 orderIndex, string executionError);
     event UpdateMinTimeExecuteDelay(uint256 minTimeExecuteDelay);
     event UpdateMinTimeCancelDelay(uint256 minTimeCancelDelay);
+    event UpdateAllowPublicKeeper(bool allowPublicKeeper);
     event UpdateMinExecutionFee(uint256 minExecutionFee);
     event UpdateTradeFee(uint256 tradeFee);
     event UpdateKeeper(address keeper, bool isAlive);
@@ -215,6 +218,11 @@ contract OrderBook is Governable, ReentrancyGuard {
         emit UpdateMinTimeCancelDelay(_minTimeCancelDelay);
     }
 
+    function setAllowPublicKeeper(bool _allowPublicKeeper) external onlyAdmin {
+        allowPublicKeeper = _allowPublicKeeper;
+        emit UpdateAllowPublicKeeper(_allowPublicKeeper);
+    }
+
     function setKeeper(address _account, bool _isActive) external onlyAdmin {
         isKeeper[_account] = _isActive;
         emit UpdateKeeper(_account, _isActive);
@@ -225,7 +233,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         emit UpdateAdmin(_admin);
     }
 
-    function setPricesAndExecuteOrders(
+    function executeOrdersWithPrices(
         address[] memory tokens,
         uint256[] memory prices,
         address[] memory _openAddresses,
@@ -246,6 +254,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         address payable _feeReceiver
     ) public {
         require(_openAddresses.length == _openOrderIndexes.length && _closeAddresses.length == _closeOrderIndexes.length, "OrderBook: not same length");
+        isKeeperCall = isKeeper[msg.sender];
         for (uint256 i = 0; i < _openAddresses.length; i++) {
             try this.executeOpenOrder(_openAddresses[i], _openOrderIndexes[i], _feeReceiver) {
             } catch Error(string memory executionError) {
@@ -258,6 +267,7 @@ contract OrderBook is Governable, ReentrancyGuard {
                 emit ExecuteCloseOrderError(_closeAddresses[i], _closeOrderIndexes[i], executionError);
             } catch (bytes memory /*lowLevelData*/) {}
         }
+        isKeeperCall = false;
     }
 
     function cancelMultiple(
@@ -278,7 +288,7 @@ contract OrderBook is Governable, ReentrancyGuard {
         uint256 _triggerPrice,
         uint256 _productId
     ) public view returns (uint256, bool) {
-        (address productToken,,,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
+        (address productToken,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
         uint256 currentPrice = _isLong ? IOracle(oracle).getPrice(productToken, true) : IOracle(oracle).getPrice(productToken, false);
         bool isPriceValid = _triggerAboveThreshold ? currentPrice >= _triggerPrice : currentPrice <= _triggerPrice;
         require(isPriceValid, "OrderBook: invalid price for execution");
@@ -467,8 +477,8 @@ contract OrderBook is Governable, ReentrancyGuard {
     function executeOpenOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) public nonReentrant {
         OpenOrder memory order = openOrders[_address][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
-        require(order.orderTimestamp + minTimeExecuteDelay < block.timestamp, "OrderBook: min time execute delay not yet passed");
-
+        require((msg.sender == address(this) && isKeeperCall) || isKeeper[msg.sender] || (allowPublicKeeper && order.orderTimestamp + minTimeExecuteDelay < block.timestamp),
+            "OrderBook: min time execute delay not yet passed");
         (uint256 currentPrice, ) = validatePositionOrderPrice(
             order.isLong,
             order.triggerAboveThreshold,
@@ -562,7 +572,8 @@ contract OrderBook is Governable, ReentrancyGuard {
     function executeCloseOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) public nonReentrant {
         CloseOrder memory order = closeOrders[_address][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
-        require(order.orderTimestamp + minTimeExecuteDelay < block.timestamp, "OrderBook: min time execute delay not yet passed");
+        require((msg.sender == address(this) && isKeeperCall) || isKeeper[msg.sender] || (allowPublicKeeper && order.orderTimestamp + minTimeExecuteDelay < block.timestamp),
+            "OrderBook: min time execute delay not yet passed");
         (,uint256 leverage,,,,,,,) = IPikaPerp(pikaPerp).getPosition(_address, order.productId, order.isLong);
         (uint256 currentPrice, ) = validatePositionOrderPrice(
             !order.isLong,
@@ -640,7 +651,7 @@ contract OrderBook is Governable, ReentrancyGuard {
     }
 
     function getTradeFeeRate(uint256 _productId, address _account) private returns(uint256) {
-        (address productToken,,uint256 fee,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
+        (address productToken,,uint256 fee,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
         return IFeeCalculator(feeCalculator).getFee(productToken, fee, _account, msg.sender);
     }
 

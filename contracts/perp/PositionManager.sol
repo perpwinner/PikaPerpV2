@@ -161,8 +161,8 @@ contract PositionManager is Governable, ReentrancyGuard {
         uint256 blockGap,
         uint256 timeGap
     );
-    event ExecuteOpenPositionError(address, uint256, string);
-    event ExecuteClosePositionError(address, uint256, string);
+    event ExecuteOpenPositionError(address indexed account, uint256 index, string executionError);
+    event ExecuteClosePositionError(address indexed account, uint256 index, string executionError);
     event SetPositionKeeper(address indexed account, bool isActive);
     event SetPriceKeeper(address indexed account, bool isActive);
     event SetMinExecutionFee(uint256 minExecutionFee);
@@ -277,16 +277,16 @@ contract PositionManager is Governable, ReentrancyGuard {
         emit SetAdmin(_admin);
     }
 
-    function setPricesAndExecuteNPositions(
+    function executeNPositionsWithPrices(
         address[] memory tokens,
         uint256[] memory prices,
         uint256 n,
         address payable _executionFeeReceiver
     ) external {
-        setPricesAndExecutePositions(tokens, prices, openPositionRequestKeysStart + n, closePositionRequestKeysStart + n, _executionFeeReceiver);
+        executePositionsWithPrices(tokens, prices, openPositionRequestKeysStart + n, closePositionRequestKeysStart + n, _executionFeeReceiver);
     }
 
-    function setPricesAndExecutePositions(
+    function executePositionsWithPrices(
         address[] memory tokens,
         uint256[] memory prices,
         uint256 _openEndIndex,
@@ -370,13 +370,13 @@ contract PositionManager is Governable, ReentrancyGuard {
             // in case an error was thrown, cancel the request
             try this.executeClosePosition(key, _executionFeeReceiver) returns (bool _wasExecuted) {
                 if (!_wasExecuted) { break; }
-            }  catch Error(string memory executionError)  {
+            } catch Error(string memory executionError)  {
                 emit ExecuteClosePositionError(closePositionRequests[key].account, index, executionError);
                 // wrap this call in a try catch to prevent invalid cancels from blocking the loop
                 try this.cancelClosePosition(key, _executionFeeReceiver) returns (bool _wasCancelled) {
                     if (!_wasCancelled) { break; }
                 } catch {}
-            }  catch (bytes memory /*lowLevelData*/) {
+            } catch (bytes memory /*lowLevelData*/) {
                 // wrap this call in a try catch to prevent invalid cancels from blocking the loop
                 try this.cancelClosePosition(key, _executionFeeReceiver) returns (bool _wasCancelled) {
                     if (!_wasCancelled) { break; }
@@ -625,7 +625,7 @@ contract PositionManager is Governable, ReentrancyGuard {
         }
 
         if (isKeeperCall) {
-            (address productToken,,,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
+            (address productToken,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
             uint256 price = _isLong ? IOracle(oracle).getPrice(productToken, true) : IOracle(oracle).getPrice(productToken, false);
             if (_isLong) {
                 require(price <= _acceptablePrice, "PositionManager: current price too low");
@@ -752,7 +752,7 @@ contract PositionManager is Governable, ReentrancyGuard {
     }
 
     function getTradeFeeRate(uint256 _productId, address _account) private returns(uint256) {
-        (address productToken,,uint256 fee,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
+        (address productToken,,uint256 fee,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
         return IFeeCalculator(feeCalculator).getFee(productToken, fee, _account, msg.sender);
     }
 
