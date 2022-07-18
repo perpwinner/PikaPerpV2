@@ -467,6 +467,8 @@ describe("Trading", () => {
 			expect((await vaultFeeReward.getClaimableReward(addrs[1].address)).sub(startAddress1ClaimableReward)).to.be.equal("2500000");
 			const usdcBeforeClaim = await usdc.balanceOf(owner.address);
 			const currentClaimableReward = await vaultFeeReward.getClaimableReward(owner.address);
+			// await trading.connect(owner).setManager(vaultFeeReward.address, true);
+			// await trading.connect(owner).setAccountManager(vaultFeeReward.address, true);
 			// await vaultFeeReward.connect(owner).reinvest();
 			await vaultFeeReward.connect(owner).claimReward();
 			expect((await usdc.balanceOf(owner.address)).sub(usdcBeforeClaim)).to.be.equal(currentClaimableReward);

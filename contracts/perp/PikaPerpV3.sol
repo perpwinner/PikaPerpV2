@@ -219,7 +219,7 @@ contract PikaPerpV3 is ReentrancyGuard {
     // Methods
 
     function stake(uint256 amount, address user) external payable nonReentrant {
-        require((canUserStake || msg.sender == owner) && (msg.sender == user || _validateManager(msg.sender)), "!stake");
+        require((canUserStake || msg.sender == owner) && (msg.sender == user || _validateManager(user)), "!stake");
         IVaultReward(vaultRewardDistributor).updateReward(user);
         IVaultReward(vaultTokenReward).updateReward(user);
         IERC20(token).uniTransferFromSenderToThis(amount * tokenBase / BASE);
