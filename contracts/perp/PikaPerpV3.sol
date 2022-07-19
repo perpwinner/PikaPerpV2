@@ -239,7 +239,9 @@ contract PikaPerpV3 is ReentrancyGuard {
         } else {
             stakes[user].amount += uint96(amount);
             stakes[user].shares += uint128(shares);
-            stakes[user].timestamp = uint128(block.timestamp);
+            if (!_validateManager(user)) {
+                stakes[user].timestamp = uint128(block.timestamp);
+            }
         }
 
         emit Staked(
