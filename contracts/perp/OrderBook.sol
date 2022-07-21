@@ -164,7 +164,6 @@ contract OrderBook is Governable, ReentrancyGuard {
     event UpdateMinTimeCancelDelay(uint256 minTimeCancelDelay);
     event UpdateAllowPublicKeeper(bool allowPublicKeeper);
     event UpdateMinExecutionFee(uint256 minExecutionFee);
-    event UpdateTradeFee(uint256 tradeFee);
     event UpdateKeeper(address keeper, bool isAlive);
     event UpdateAdmin(address admin);
 

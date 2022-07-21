@@ -90,13 +90,13 @@ contract PikaPerpV3 is ReentrancyGuard {
     uint256 public exposureMultiplier = 10000; // exposure multiplier
     uint256 public utilizationMultiplier = 10000; // exposure multiplier
     uint256 public maxExposureMultiplier = 3; // total open interest of a product should not exceed maxExposureMultiplier * maxExposure
-    uint256 public liquidationBounty = 5000; // In bps. 5000 = 50%
+    uint256 private liquidationBounty = 5000; // In bps. 5000 = 50%
     uint256 public liquidationThreshold = 8000; // In bps. 8000 = 80%
     uint256 private pendingProtocolReward; // protocol reward collected
     uint256 private pendingPikaReward; // pika reward collected
     uint256 private pendingVaultReward; // vault reward collected
     uint256 public totalOpenInterest;
-    uint256 public shiftDivider = 2;
+    uint256 public shiftDivider = 3;
     bool private canUserStake = true;
     bool private allowPublicLiquidator = false;
     bool private isTradeEnabled = true;
@@ -201,6 +201,9 @@ contract PikaPerpV3 is ReentrancyGuard {
     );
     event GuardianUpdated(
         address newGuardian
+    );
+    event GovUpdated(
+        address newGov
     );
 
     // Constructor
@@ -868,7 +871,7 @@ contract PikaPerpV3 is ReentrancyGuard {
         uint256 _shiftDivider
     ) external {
         onlyOwner();
-        require(_maxShift <= 0.01e8 && _minProfitTime <= 24 hours && _shiftDivider > 0 && liquidationThreshold > 5000 && maxExposureMultiplier > 0);
+        require(_maxShift <= 0.01e8 && _minProfitTime <= 24 hours && _shiftDivider > 0 && _liquidationThreshold > 5000 && _maxExposureMultiplier > 0);
         maxShift = _maxShift;
         minProfitTime = _minProfitTime;
         canUserStake = _canUserStake;
@@ -911,6 +914,12 @@ contract PikaPerpV3 is ReentrancyGuard {
         onlyGov();
         guardian = _guardian;
         emit GuardianUpdated(_guardian);
+    }
+
+    function setGov(address _gov) external {
+        onlyGov();
+        gov = _gov;
+        emit GovUpdated(_gov);
     }
 
     function pauseTrading() external {

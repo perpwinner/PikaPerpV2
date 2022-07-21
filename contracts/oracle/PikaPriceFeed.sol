@@ -14,7 +14,9 @@ contract PikaPriceFeed is Governable {
     uint256 public priceDuration = 600; // 10 mins
     uint256 public updateInterval = 120; // 2 mins
     mapping (address => uint256) public priceMap;
-    mapping (address => uint256) public maxPriceDiff;
+    mapping (address => uint256) public maxPriceDiffs;
+    mapping (address => uint256) public spreads;
+    mapping (address => uint256) lastUpdatedTimes;
     mapping(address => bool) public keepers;
     mapping (address => bool) public voters;
     mapping (address => bool) public disableFastOracleVotes;
@@ -25,17 +27,20 @@ contract PikaPriceFeed is Governable {
     bool public isSpreadEnabled = false;
     uint256 public delta = 20; // 20bp
     uint256 public decay = 9000; // 0.9
-    uint256 public spread = 30; // 0.3%
+    uint256 public defaultMaxPriceDiff = 2e16; // 2%
+    uint256 public defaultSpread = 30; // 0.3%
 
     event PriceSet(address token, uint256 price, uint256 timestamp);
     event PriceDurationSet(uint256 priceDuration);
     event UpdateIntervalSet(uint256 updateInterval);
+    event DefaultMaxPriceDiffSet(uint256 maxPriceDiff);
     event MaxPriceDiffSet(address token, uint256 maxPriceDiff);
     event KeeperSet(address keeper, bool isActive);
     event VoterSet(address voter, bool isActive);
     event DeltaAndDecaySet(uint256 delta, uint256 decay);
     event IsSpreadEnabledSet(bool isSpreadEnabled);
-    event SpreadSet(uint256 spread);
+    event DefaultSpreadSet(uint256 defaultSpread);
+    event SpreadSet(address token, uint256 spread);
     event IsChainlinkOnlySet(bool isChainlinkOnlySet);
     event IsPikaOracleOnlySet(bool isPikaOracleOnlySet);
     event SetOwner(address owner);
@@ -54,6 +59,7 @@ contract PikaPriceFeed is Governable {
     function getPrice(address token, bool isMax) external view returns (uint256) {
         (uint256 price, bool isChainlink) = getPriceAndSource(token);
         if (isSpreadEnabled || isChainlink || disableFastOracleVote >= minVoteCount) {
+            uint256 spread = spreads[token] == 0 ? defaultSpread : spreads[token];
             return isMax ? price * (PRICE_BASE + spread) / PRICE_BASE : price * (PRICE_BASE - spread) / PRICE_BASE;
         }
         return price;
@@ -75,13 +81,14 @@ contract PikaPriceFeed is Governable {
 
     function getPriceAndSource(address token) public view returns (uint256, bool) {
         (uint256 chainlinkPrice, uint256 chainlinkTimestamp) = getChainlinkPrice(token);
-        if (isChainlinkOnly || (!isPikaOracleOnly && (block.timestamp > lastUpdatedTime.add(priceDuration) && chainlinkTimestamp > lastUpdatedTime))) {
+        if (isChainlinkOnly || (!isPikaOracleOnly && (block.timestamp > lastUpdatedTimes[token].add(priceDuration) && chainlinkTimestamp > lastUpdatedTimes[token]))) {
             return (chainlinkPrice, true);
         }
         uint256 pikaPrice = priceMap[token];
         uint256 priceDiff = pikaPrice > chainlinkPrice ? (pikaPrice.sub(chainlinkPrice)).mul(1e18).div(chainlinkPrice) :
             (chainlinkPrice.sub(pikaPrice)).mul(1e18).div(chainlinkPrice);
-        if (priceDiff > maxPriceDiff[token]) {
+        uint256 maxPriceDiff = maxPriceDiffs[token] == 0 ? defaultMaxPriceDiff : maxPriceDiffs[token];
+        if (priceDiff > maxPriceDiff) {
             return (chainlinkPrice, true);
         }
         return (pikaPrice, false);
@@ -137,6 +144,7 @@ contract PikaPriceFeed is Governable {
         for (uint256 i = 0; i < tokens.length; i++) {
             address token = tokens[i];
             priceMap[token] = prices[i];
+            lastUpdatedTimes[token] = block.timestamp;
             emit PriceSet(token, prices[i], block.timestamp);
         }
         lastUpdatedTime = block.timestamp;
@@ -175,9 +183,15 @@ contract PikaPriceFeed is Governable {
         emit UpdateIntervalSet(_updateInterval);
     }
 
+    function setDefaultMaxPriceDiff(uint256 _defaultMaxPriceDiff) external onlyOwner {
+        require(_defaultMaxPriceDiff < 3e16, "too big"); // must be smaller than 3%
+        defaultMaxPriceDiff = _defaultMaxPriceDiff;
+        emit DefaultMaxPriceDiffSet(_defaultMaxPriceDiff);
+    }
+
     function setMaxPriceDiff(address _token, uint256 _maxPriceDiff) external onlyOwner {
         require(_maxPriceDiff < 3e16, "too big"); // must be smaller than 3%
-        maxPriceDiff[_token] = _maxPriceDiff;
+        maxPriceDiffs[_token] = _maxPriceDiff;
         emit MaxPriceDiffSet(_token, _maxPriceDiff);
     }
 
@@ -212,9 +226,14 @@ contract PikaPriceFeed is Governable {
         emit IsSpreadEnabledSet(_isSpreadEnabled);
     }
 
-    function setSpread(uint256 _spread) external onlyOwner {
-        spread = _spread;
-        emit SpreadSet(_spread);
+    function setDefaultSpread(uint256 _defaultSpread) external onlyOwner {
+        defaultSpread = _defaultSpread;
+        emit DefaultSpreadSet(_defaultSpread);
+    }
+
+    function setSpread(address _token, uint256 _spread) external onlyOwner {
+        spreads[_token] = _spread;
+        emit SpreadSet(_token, _spread);
     }
 
     function setOwner(address _owner) external onlyGov {
