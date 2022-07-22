@@ -74,6 +74,19 @@ contract PikaPriceFeed is Governable {
         return lastUpdatedTime + updateInterval < block.timestamp;
     }
 
+    function shouldUpdatePriceForToken(address token) external view returns (bool) {
+        return lastUpdatedTimes[token] + updateInterval < block.timestamp;
+    }
+
+    function shouldUpdatePriceForTokens(address[] calldata tokens) external view returns (bool) {
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (lastUpdatedTimes[tokens[i]] + updateInterval < block.timestamp) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     function getPrice(address token) public view returns (uint256) {
         (uint256 price,) = getPriceAndSource(token);
         return price;
