@@ -81,7 +81,8 @@ function assertAlmostEqual(actual, expected, accuracy = 10000000) {
 
 describe("Trading", () => {
 
-	let trading, addrs = [], owner, oracle, usdc, fundingManager, pika, vePikaFeeReward, vaultFeeReward, vaultTokenReward, rewardToken, orderbook, feeCalculator, positionManager;
+	let trading, addrs = [], owner, oracle, usdc, fundingManager, pika, vePikaFeeReward, vaultFeeReward, vaultTokenReward,
+		rewardToken, orderbook, feeCalculator, positionManager, liquidator;
 
 	before(async () => {
 
@@ -139,6 +140,10 @@ describe("Trading", () => {
 
 		const positionManagerContract = await ethers.getContractFactory("PositionManager");
 		positionManager = await positionManagerContract.deploy(trading.address, feeCalculator.address, oracle.address, usdc.address, "100000", "1000000");
+
+		const liquidatorContract = await ethers.getContractFactory("Liquidator");
+		liquidator = await liquidatorContract.deploy(trading.address, oracle.address, fundingManager.address, addrs[2].address);
+		await liquidator.connect(owner).setLiquidator(owner.address, true)
 
 		let v = [
 			100000000000000, //1m usdc cap
@@ -407,7 +412,8 @@ describe("Trading", () => {
 			// const price3 = _calculatePriceWithFee(oracle.address, 10, false, margin*leverage/1e8, 0, 100000000e8, 50000000e8, margin*leverage/1e8);
 			await oracle.setPrice(2760e8);
 			await trading.setParameters("300000", "43200", true, true, false, false, "10000", "10000", "3", "5000", "8000", "2");
-			const tx3 = await trading.connect(addrs[userId]).liquidatePositions([positionId]);
+			// const tx3 = await trading.connect(addrs[userId]).liquidatePositions([positionId]);
+			const tx3 = await liquidator.connect(owner).liquidatePositions([user], [productId], [true]);
 			const totalFee = getInterestFee(3*margin, leverage, 0, 500);
 			expect(await tx3).to.emit(trading, "ClosePosition").withArgs(positionId, user, productId, latestPrice, position1.price, margin.toString(), leverage.toString(), totalFee, (-1*margin).toString(), true);
 			// console.log("after liquidation", (await usdc.balanceOf(trading.address)).toString());

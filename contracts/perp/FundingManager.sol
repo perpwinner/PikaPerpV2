@@ -17,8 +17,8 @@ contract FundingManager is Governable {
     event UpdateOwner(address owner);
 
     uint256 constant public FUNDING_BASE = 10**12;
-    uint256 maxFundingRate = 10 * FUNDING_BASE;
-    uint256 minFundingMultiplier = 2 * FUNDING_BASE;
+    uint256 public maxFundingRate = 10 * FUNDING_BASE;
+    uint256 public minFundingMultiplier = 2 * FUNDING_BASE;
     mapping(uint256 => uint256) public fundingMultipliers;
     mapping(uint256 => int256) public cumulativeFundings;
     mapping(uint256 => uint256) public lastUpdateTimes;
