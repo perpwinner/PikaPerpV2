@@ -10,37 +10,23 @@ import "../access/Governable.sol";
 contract FeeCalculator is Governable {
 
     uint256 public constant PRICE_BASE = 10000;
-    uint256 public threshold;
-    uint256 public weightDecay;
     uint256 public baseFee = 10;
-    uint256 public n = 5;
-    uint256 public maxDynamicFee = 50; // 0.5%
     address public owner;
-    address public oracle;
-    bool public isDynamicFee = true;
+    address public keeper;
     bool public isDiscountEnabled = false;
     mapping (address => uint256) public accountFeeDiscount;
-    mapping (address => uint256) public senderFeeDiscount;
 
-    uint256 public MAX_DYNAMIC_FEE = 200; // 2%
     uint256 public MAX_ACCOUNT_DISCOUNT = 5000; // 50%
     uint256 public MAX_SENDER_DISCOUNT = 9000; // 90%
 
-    event SetThreshold(uint256 threshold);
-    event SetWeightDecay(uint256 weightDecay);
-    event SetN(uint256 n);
-    event SetIsDynamicFee(bool isDynamicFee);
     event SetIsDiscountEnabled(bool isDiscountEnabled);
-    event SetMaxDynamicFee(uint256 maxDynamicFee);
     event SetDiscountForAccount(address account, uint256 discount);
-    event SetDiscountForSender(address sender, uint256 discount);
     event SetOwner(address owner);
+    event SetKeeper(address keeper);
 
-    constructor(uint256 _threshold, uint256 _weightDecay, address _oracle) public {
-        threshold = _threshold;
-        weightDecay = _weightDecay;
-        oracle = _oracle;
+    constructor() public {
         owner = msg.sender;
+        keeper = msg.sender;
     }
 
     /**
@@ -54,63 +40,9 @@ contract FeeCalculator is Governable {
     function getFee(address token, uint256 productFee, address account, address sender) external view returns (uint256) {
         uint256 fee = productFee;
         if (isDiscountEnabled) {
-            uint256 discount = account == sender ? accountFeeDiscount[account] : accountFeeDiscount[account] + senderFeeDiscount[sender];
-            uint256 fee = fee * (PRICE_BASE - discount) / PRICE_BASE;
-        }
-        if (isDynamicFee) {
-            return fee + getDynamicFee(token);
+            fee = fee * (PRICE_BASE - accountFeeDiscount[account]) / PRICE_BASE;
         }
         return fee;
-    }
-
-    /**
-     * @notice The dynamic fee to add to base fee. It is updated based on the volatility of recent price updates
-     * Larger volatility leads to the higher the dynamic fee. It is used to mitigate oracle front-running.
-     */
-    function getDynamicFee(address token) public view returns (uint256) {
-        uint256[] memory prices = IOracle(oracle).getLastNPrices(token, n);
-        uint256 dynamicFee = 0;
-        // go backwards in price array
-        for (uint i = prices.length - 1; i > 0; i--) {
-            dynamicFee = dynamicFee * weightDecay / PRICE_BASE;
-            uint deviation = _calDeviation(prices[i - 1], prices[i], threshold);
-            dynamicFee += deviation;
-        }
-        dynamicFee = dynamicFee > maxDynamicFee ? maxDynamicFee : dynamicFee;
-        return dynamicFee;
-    }
-
-    function _calDeviation(
-        uint256 price,
-        uint256 previousPrice,
-        uint256 threshold
-    ) internal pure returns (uint256) {
-        if (previousPrice == 0) {
-            return 0;
-        }
-        uint256 absDelta = price > previousPrice ? price - previousPrice : previousPrice - price;
-        uint256 deviationRatio = absDelta * PRICE_BASE / previousPrice;
-        return deviationRatio > threshold ? deviationRatio - threshold : 0;
-    }
-
-    function setThreshold(uint256 _threshold) external onlyOwner {
-        threshold = _threshold;
-        emit SetThreshold(_threshold);
-    }
-
-    function setWeightDecay(uint256 _weightDecay) external onlyOwner {
-        weightDecay = _weightDecay;
-        emit SetWeightDecay(_weightDecay);
-    }
-
-    function setN(uint256 _n) external onlyOwner {
-        n = _n;
-        emit SetN(n);
-    }
-
-    function setIsDynamicFee(bool _isDynamicFee) external onlyOwner {
-        isDynamicFee = _isDynamicFee;
-        emit SetIsDynamicFee(_isDynamicFee);
     }
 
     function setIsDiscountEnabled(bool _isDiscountEnabled) external onlyOwner {
@@ -118,22 +50,10 @@ contract FeeCalculator is Governable {
         emit SetIsDiscountEnabled(_isDiscountEnabled);
     }
 
-    function setMaxDynamicFee(uint256 _maxDynamicFee) external onlyOwner {
-        require(_maxDynamicFee <= MAX_DYNAMIC_FEE);
-        maxDynamicFee = _maxDynamicFee;
-        emit SetMaxDynamicFee(_maxDynamicFee);
-    }
-
-    function setDiscountForAccount(address _account, uint256 _discount) external onlyOwner {
+    function setDiscountForAccount(address _account, uint256 _discount) external onlyKeeper {
         require(_discount <= MAX_ACCOUNT_DISCOUNT);
         accountFeeDiscount[_account] = _discount;
         emit SetDiscountForAccount(_account, _discount);
-    }
-
-    function setDiscountForSender(address _sender, uint256 _discount) external onlyOwner {
-        require(_discount <= MAX_SENDER_DISCOUNT);
-        senderFeeDiscount[_sender] = _discount;
-        emit SetDiscountForSender(_sender, _discount);
     }
 
     function setOwner(address _owner) external onlyGov {
@@ -141,8 +61,18 @@ contract FeeCalculator is Governable {
         emit SetOwner(_owner);
     }
 
+    function setKeeper(address _keeper) external onlyOwner {
+        keeper = _keeper;
+        emit SetKeeper(_keeper);
+    }
+
     modifier onlyOwner() {
         require(msg.sender == owner, "!owner");
+        _;
+    }
+
+    modifier onlyKeeper() {
+        require(msg.sender == keeper, "!keeper");
         _;
     }
 }

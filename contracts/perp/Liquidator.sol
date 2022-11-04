@@ -7,6 +7,7 @@ import './IFundingManager.sol';
 import './FundingManager.sol';
 import "../oracle/IOracle.sol";
 import '../lib/PerpLib.sol';
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // In PikaPerpV3 contract, the liquidatePosition function has an issue where the open interest can be decreased even if the position is not liquidatable.
 // This contract is created to avoid that issue. The liquidateWithPrices and liquidatePosition functions in this contract are the only functions used for liquidation.
@@ -16,6 +17,7 @@ contract Liquidator is Governable {
 
     address public owner;
     address public pikaPerp;
+    address public rewardToken;
     address public priceFeed;
     address public fundingManager;
     // a forever locked timelock account that was used one time to open positions to correct the totalOpenInterest in PikaPerpV3 and this account should never be liquidated
@@ -28,7 +30,9 @@ contract Liquidator is Governable {
     uint256 private constant FUNDING_BASE = 10**12;
 
     event NotLiquidate(uint256 positionId);
+    event RewardWithdraw(address indexed receiver, uint256 rewardAmount);
     event PikaPerpSet(address pikaPerp);
+    event RewardTokenSet(address rewardToken);
     event PriceFeedSet(address priceFeed);
     event FundingManagerSet(address fundingManager);
     event AllowPublicLiquidatorSet(bool allowPublicLiquidator);
@@ -36,9 +40,10 @@ contract Liquidator is Governable {
     event UpdateLiquidator(address liquidator, bool isAlive);
     event UpdateOwner(address owner);
 
-    constructor(address _pikaPerp, address _priceFeed, address _fundingManager, address _lockedAccount) public {
+    constructor(address _pikaPerp, address _rewardToken, address _priceFeed, address _fundingManager, address _lockedAccount) public {
         owner = msg.sender;
         pikaPerp = _pikaPerp;
+        rewardToken = _rewardToken;
         priceFeed = _priceFeed;
         fundingManager = _fundingManager;
         lockedAccount = _lockedAccount;
@@ -56,7 +61,7 @@ contract Liquidator is Governable {
     }
 
     function liquidatePositions(address[] calldata accounts, uint256[] calldata productIds, bool[] calldata isLongs) public {
-        require(isLiquidator[msg.sender] || allowPublicLiquidator, "not liquidator");
+        require(isLiquidator[msg.sender] || allowPublicLiquidator, "!liquidator");
         for (uint256 i = 0; i < accounts.length; i++) {
             if (canLiquidate(accounts[i], productIds[i], isLongs[i])) {
                 positionIds.push(getPositionId(accounts[i], productIds[i], isLongs[i]));
@@ -117,9 +122,20 @@ contract Liquidator is Governable {
         return uint256(keccak256(abi.encodePacked(account, productId, isLong)));
     }
 
+    function withdrawReward(address receiver) external onlyOwner {
+        uint256 rewardAmount = IERC20(rewardToken).balanceOf(address(this));
+        IERC20(rewardToken).transfer(receiver, rewardAmount);
+        emit RewardWithdraw(receiver, rewardAmount);
+    }
+
     function setPikaPerp(address _pikaPerp) external onlyOwner {
         pikaPerp = _pikaPerp;
         emit PikaPerpSet(_pikaPerp);
+    }
+
+    function setRewardToken(address _rewardToken) external onlyOwner {
+        rewardToken = _rewardToken;
+        emit RewardTokenSet(_rewardToken);
     }
 
     function setPriceFeed(address _priceFeed) external onlyOwner {
