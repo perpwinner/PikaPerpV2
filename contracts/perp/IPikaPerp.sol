@@ -40,5 +40,4 @@ interface IPikaPerp {
     ) external view returns (uint256,uint256,uint256,uint256,uint256,address,uint256,bool,int256);
     function getMaxExposure(uint256 productWeight) external view returns(uint256);
     function getCumulativeFunding(uint256 _productId) external view returns(uint256);
-    function liquidationThreshold() external view returns(uint256);
 }
